@@ -1,0 +1,15 @@
+
+name: Build CareerMap iOS
+
+# on:
+#   push:
+#     branches:
+#       - main
+
+jobs:
+  build_ios:
+    name: Build iOS app
+    type: build
+    params:
+      platform: ios
+      profile: production
