@@ -3,12 +3,6 @@
     "name": "CareerMap",
     "slug": "careermap",
     "version": "1.0.0",
-    "updates": {
-      "enabled": true,
-      "checkAutomatically": "ON_LOAD",
-      "fallbackToCacheTimeout": 0,
-      "url": "https://u.expo.dev/c27fd7cb-668e-4fc1-b71a-9e0b4f8215cd"
-    },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "careermap",
@@ -60,11 +54,12 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "c27fd7cb-668e-4fc1-b71a-9e0b4f8215cd"
+        "projectId": "611c8673-213f-4a60-b705-4d6eff917b75"
       }
     },
     "runtimeVersion": {
       "policy": "appVersion"
-    }
+    },
+    "owner": "jayashree-0926"
   }
 }
