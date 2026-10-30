@@ -26,7 +26,8 @@ jobs:
         run: npm ci
 
       - name: Verify OTA app configuration
-        run: node -e "const { expo } = require('./app.json'); const id = expo.extra?.eas?.projectId; const url = expo.updates?.url; const runtime = expo.runtimeVersion; if (!id || url !== 'https://u.expo.dev/' + id || !runtime) { console.error({ id, url, runtime }); process.exit(1); } console.log('Project:', id, '| Runtime:', runtime, '| Channel: preview | Platform: android');"
+        run: |
+          node -e 'const { expo } = require("./app.json"); const id = expo.extra?.eas?.projectId; const url = expo.updates?.url; const runtime = expo.runtimeVersion; if (!id || url !== "https://u.expo.dev/" + id || !runtime) { console.error({ id, url, runtime }); process.exit(1); } console.log("Project=" + id + " Runtime=" + runtime + " Channel=preview Platform=android");'
 
       - name: Publish EAS Update
         run: npx eas-cli@latest update --channel preview --platform android --message "Automatic Android update from main" --non-interactive
