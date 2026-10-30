@@ -7,9 +7,8 @@ import api from '../../../src/api/axios';
 import { createMentorReview } from '../../../src/api/mentorApi';
 import { checkModuleAccess, getModules } from '../../../src/api/moduleAccessApi';
 import { useAppState } from '../../../src/app-state';
-import { featuredInstitutes, featuredScholarships, moduleCards, palette, studentProfile } from '../../../src/careermap-data';
+import { featuredInstitutes, featuredScholarships, moduleCards, palette } from '../../../src/careermap-data';
 import { AnimatedPressable, Pill, Screen, SectionHeader, UnlockBottomSheet } from '../../../src/careermap-ui';
-import { GlobalSearch } from '../../../src/global-search';
 import { useAuthStore } from '../../../src/store/auth-store';
 import { openSubscriptionPrompt } from '../../../src/subscription-flow';
 const parseReviewDateValue = (value) => {
@@ -151,7 +150,6 @@ export default function HomeScreen() {
   const [answers, setAnswers] = useState(Array(personalityQuestions.length).fill(null));
   const [dashboardData, setDashboardData] = useState(null);
   const [lockedModule, setLockedModule] = useState(null);
-  const [searchOpen, setSearchOpen] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
   const [reviewRating, setReviewRating] = useState(5);
@@ -167,7 +165,7 @@ export default function HomeScreen() {
     scholarships: { status: 'locked' },
     institutes: { status: 'locked' },
   });
-  const { isUnlocked, onboarding, unreadNotificationsCount, userProfile } = useAppState();
+  const { isUnlocked, onboarding, userProfile } = useAppState();
   const { width } = useWindowDimensions();
   const isLargeScreen = width >= 768;
   const moduleCardWidth = useMemo(() => {
@@ -327,11 +325,10 @@ export default function HomeScreen() {
   useFocusEffect(useCallback(() => {
     loadDashboard();
   }, []));
-  const dashboardUserName = useMemo(() => {
+  const welcomeName = useMemo(() => {
     const firstName = dashboardData?.user?.firstName?.trim();
     const lastName = dashboardData?.user?.lastName?.trim();
-    const fullName = [firstName, lastName].filter(Boolean).join(' ').trim();
-    return fullName || userProfile.name || onboarding.name || studentProfile.name;
+    return [firstName, lastName].filter(Boolean).join(' ').trim() || userProfile.name || onboarding.name || 'there';
   }, [dashboardData?.user?.firstName, dashboardData?.user?.lastName, onboarding.name, userProfile.name]);
   const dashboardModules = useMemo(() => {
     if (!dashboardData?.modules?.length) {
@@ -738,30 +735,6 @@ export default function HomeScreen() {
     </Screen>);
   }
   return (<Screen>
-    <View className="flex-row items-center justify-between">
-      <View className="flex-row items-center gap-3">
-        <View className="h-11 w-11 items-center justify-center rounded-full" style={{ backgroundColor: `${palette.primary}12` }}>
-          <Text className="text-[20px] font-black text-brand">{dashboardUserName.charAt(0).toUpperCase()}</Text>
-        </View>
-        <View>
-          <Text className={`text-[18px] font-black ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{dashboardUserName}</Text>
-        </View>
-      </View>
-      <View className="flex-row items-center gap-2">
-      <AnimatedPressable className={`h-[42px] w-[42px] items-center justify-center rounded-[16px] border ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`} onPress={() => setSearchOpen(true)}>
-        <Ionicons name="search" size={20} color={preferences.darkMode ? '#ffffff' : palette.text} />
-      </AnimatedPressable>
-      <AnimatedPressable className={`h-[42px] w-[42px] items-center justify-center rounded-[16px] border ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`} onPress={() => router.push('/(drawer)/notifications')}>
-        <View className="items-center justify-center">
-          <Ionicons name="notifications-outline" size={20} color={preferences.darkMode ? '#ffffff' : palette.text} />
-          {unreadNotificationsCount > 0 ? (<View className="absolute -right-2 -top-2 min-w-[18px] rounded-full bg-brand px-1 py-[1px]">
-            <Text className="text-center text-[10px] font-extrabold text-white">{unreadNotificationsCount}</Text>
-          </View>) : null}
-        </View>
-      </AnimatedPressable>
-      </View>
-    </View>
-
     <View className="overflow-hidden rounded-[28px] bg-brand p-[22px]" style={{ marginTop: 18, marginBottom: 12 }}>
       <View className="absolute bottom-[-34px] right-[-28px] h-[148px] w-[148px] rounded-full bg-white/10" />
 
@@ -770,7 +743,7 @@ export default function HomeScreen() {
           <Ionicons name="sparkles" size={14} color="#f6ce63" />
           <Text className="text-[11px] font-extrabold uppercase tracking-[1px] text-[#f6ce63]">Recommended</Text>
         </View>
-        <Text className="text-[28px] font-black text-white">Know Your Personality</Text>
+        <Text className="text-[28px] font-black text-white">Welcome, {welcomeName}</Text>
         <Text className="max-w-[80%] text-[13px] leading-5 text-white/80">
           {isUnlocked('psychometric-test')
             ? 'Take the comprehensive psychometric test to get detailed career insights and recommendations.'
@@ -948,7 +921,6 @@ export default function HomeScreen() {
         <Ionicons name="chevron-forward" size={18} color={palette.muted} />
       </AnimatedPressable>))}
     </View>
-    <GlobalSearch visible={searchOpen} onClose={() => setSearchOpen(false)} />
     {lockedModule ? (<UnlockBottomSheet title={`Unlock ${lockedModule.title}`} subtitle={lockedModule.message} onClose={() => setLockedModule(null)} onPress={() => {
       const returnTarget = lockedModule.moduleId
         ? {
