@@ -7,6 +7,7 @@ import { UnlockBottomSheet } from '../../../src/careermap-ui';
 import { checkModuleAccess, getModules } from '../../../src/api/moduleAccessApi';
 import { openSubscriptionPrompt } from '../../../src/subscription-flow';
 import { palette } from '../../../src/careermap-data';
+import { AppHeader } from '../../../src/app-header';
 export default function TabsLayout() {
     const { preferences } = useAppState();
     const insets = useSafeAreaInsets();
@@ -103,7 +104,8 @@ export default function TabsLayout() {
 
     return (<>
       <Tabs screenOptions={{
-            headerShown: false,
+            headerShown: true,
+            header: () => <AppHeader />,
             tabBarActiveTintColor: palette.primary,
             tabBarInactiveTintColor: preferences.darkMode ? '#b7aeb9' : palette.muted,
             tabBarStyle: {

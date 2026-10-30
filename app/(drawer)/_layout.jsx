@@ -4,6 +4,7 @@ import { Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAppState } from '../../src/app-state';
 import { palette } from '../../src/careermap-data';
+import { AppHeader } from '../../src/app-header';
 export default function DrawerRoot() {
     const { preferences, unreadNotificationsCount } = useAppState();
     const renderDrawerIcon = (name) => {
@@ -18,7 +19,8 @@ export default function DrawerRoot() {
     };
     return (<GestureHandlerRootView style={{ flex: 1 }}>
         <Drawer screenOptions={{
-            headerStyle: { backgroundColor: preferences.darkMode ? '#050505' : palette.surface },
+            header: () => <AppHeader />,
+            headerStyle: { backgroundColor: preferences.darkMode ? '#050505' : palette.background },
             headerTintColor: preferences.darkMode ? '#ffffff' : palette.text,
             headerTitleStyle: { fontWeight: '800' },
             drawerActiveTintColor: palette.primary,
