@@ -8,7 +8,9 @@ on:
 
 jobs:
   publish-update:
+    name: Publish CareerMap OTA Update
     runs-on: ubuntu-latest
+    environment: EXPO_TOKEN
 
     steps:
       - name: Checkout code
