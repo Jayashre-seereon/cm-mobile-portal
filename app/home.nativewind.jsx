@@ -177,7 +177,7 @@ export default function HomeScreen() {
           <Text className="max-w-[80%] text-[13px] leading-5 text-white/80">
             {isUnlocked('psychometric-test')
             ? 'Take the comprehensive psychometric test to get detailed career insights and recommendations.'
-            : 'Answer quick questions to discover your personality type and ideal career direction.'}
+            : 'Answer quick questions to discover your personality type and ideal career .'}
           </Text>
           <Pressable className="mt-1 self-start rounded-full bg-white px-4 py-2.5" onPress={() => router.push('/(drawer)/assessment-preview')}>
             <Text className="text-[13px] font-extrabold text-brand">Take Full Psychometric Test</Text>
