@@ -24,7 +24,7 @@ export function Screen({ children, scroll = true, contentContainerClassName = 'g
       {child}
     </StaggerFadeUpItem>));
     const contentPaddingBottom = Math.max(insets.bottom + 120, 140);
-    return (<SafeAreaView className={`flex-1 ${preferences.darkMode ? 'bg-[#050505]' : 'bg-paper'}`} edges={['top']}>
+    return (<SafeAreaView className={`flex-1 ${preferences.darkMode ? 'bg-[#050505]' : 'bg-paper'}`} edges={['bottom']}>
       <AnimatedBackground />
       <ZoomInPage key={animationKey} style={{ flex: 1 }}>
         {scroll ? (<ScrollView className="flex-1" contentContainerClassName={contentContainerClassName} contentContainerStyle={{ paddingBottom: contentPaddingBottom }} showsVerticalScrollIndicator={false} {...mobileAssistantScrollProps}>

@@ -20,7 +20,7 @@ export default function DrawerRoot() {
     return (<GestureHandlerRootView style={{ flex: 1 }}>
         <Drawer screenOptions={{
             header: () => <AppHeader />,
-            headerStyle: { height: 72, backgroundColor: preferences.darkMode ? '#050505' : palette.background },
+            headerStyle: { backgroundColor: preferences.darkMode ? '#050505' : palette.background },
             headerTintColor: preferences.darkMode ? '#ffffff' : palette.text,
             headerTitleStyle: { fontWeight: '800' },
             drawerActiveTintColor: palette.primary,
