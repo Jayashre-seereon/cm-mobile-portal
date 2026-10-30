@@ -1,11 +1,6 @@
 
 name: Build CareerMap Android APK
 
-# on:
-#   push:
-#     branches:
-#       - main
-
 jobs:
   build_android:
     name: Build Android APK

@@ -9,14 +9,14 @@
       "distribution": "internal",
       "channel": "development"
     },
-    "preview": {
-      "distribution": "internal",
-      "environment": "preview",
-      "android": {
-        "buildType": "apk"
-      },
-      "channel": "preview"
-    },
+   "preview": {
+  "distribution": "internal",
+  "environment": "preview",
+  "android": {
+    "buildType": "apk"
+  },
+  "channel": "preview"
+},
     "production": {
       "autoIncrement": true,
       "android": {
