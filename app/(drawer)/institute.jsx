@@ -313,7 +313,9 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
     // Global search / Career Bee: show the picked institute first. Its lock still follows its
     // position in the normal list (or stays locked if it is not on this page).
     const searchFocusActive = useSearchDeepLink(params.searchKey, !isLoading && moduleAccessResolved, () => {
-        const instituteId = typeof params.instituteId === 'string' ? params.instituteId : '';
+        const instituteId = typeof params.instituteId === 'string'
+            ? params.instituteId
+            : Array.isArray(params.instituteId) ? String(params.instituteId[0] || '') : '';
         if (!instituteId) {
             return;
         }
@@ -322,7 +324,9 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
             setSearchInstitute(found);
             return;
         }
-        getInstituteById(instituteId).then(setSearchInstitute).catch(() => setSearchInstitute(null));
+        getInstituteById(instituteId)
+            .then((item) => setSearchInstitute(item || null))
+            .catch(() => setSearchInstitute(null));
     });
     const displayedInstitutes = useMemo(() => {
         if (!searchFocusActive || !searchInstitute) {

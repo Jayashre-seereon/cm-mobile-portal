@@ -105,7 +105,7 @@ export function resolveSearchTarget(item) {
 
   // 2. Institutions / colleges
   if (group === 'institutions' || group === 'colleges' || ['institution', 'institute', 'college'].includes(type)) {
-    return { pathname: ROUTES.institute, params: compactParams({ instituteId: id, search: title }) };
+    return { pathname: ROUTES.institute, params: compactParams({ instituteId: id, title }) };
   }
 
   // 3. Entrance exams
