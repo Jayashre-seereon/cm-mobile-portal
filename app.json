@@ -1,3 +1,4 @@
+
 {
   "expo": {
     "name": "CareerMap",
@@ -54,11 +55,15 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "611c8673-213f-4a60-b705-4d6eff917b75"
+        "projectId": "c27fd7cb-668e-4fc1-b71a-9e0b4f8215cd"
       }
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
+    "runtimeVersion": "1.0.0",
+    "updates": {
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/c27fd7cb-668e-4fc1-b71a-9e0b4f8215cd"
     },
     "owner": "jayashree-0926"
   }
