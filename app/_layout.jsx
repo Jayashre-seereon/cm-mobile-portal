@@ -1,7 +1,10 @@
 import '../global.css';
 import { Stack, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { useEffect } from 'react';
+import { Platform } from 'react-native';
 import { useFonts } from 'expo-font';
+import * as Updates from 'expo-updates';
 import {
   Poppins_400Regular,
   Poppins_500Medium,
@@ -12,11 +15,35 @@ import {
 } from '@expo-google-fonts/poppins';
 import { AppStateProvider, useAppState } from '../src/app-state';
 import { CareerBeeAssistant } from '../src/career-bee-assistant';
+function UpdateAutoApply() {
+    const { isUpdatePending } = Updates.useUpdates();
+
+    useEffect(() => {
+      console.info('[EAS OTA]', JSON.stringify({
+        enabled: Updates.isEnabled,
+        channel: Updates.channel,
+        runtimeVersion: Updates.runtimeVersion,
+        updateId: Updates.updateId,
+      }));
+    }, []);
+
+    useEffect(() => {
+      if (!Updates.isEnabled || __DEV__ || !isUpdatePending) return;
+      Updates.reloadAsync().catch((error) => {
+        console.warn('[EAS OTA] Could not apply downloaded update:', error);
+      });
+    }, [isUpdatePending]);
+
+    return null;
+}
+
 function RootNavigator() {
     const { preferences } = useAppState();
     const segments = useSegments();
     const showAssistant = segments[0] === '(drawer)';
+
     return (<>
+      {Platform.OS !== 'web' ? <UpdateAutoApply /> : null}
       <StatusBar style={preferences.darkMode ? 'light' : 'dark'}/>
       <Stack screenOptions={{ headerShown: false, animation: 'slide_from_right' }}>
         <Stack.Screen name="index"/>
