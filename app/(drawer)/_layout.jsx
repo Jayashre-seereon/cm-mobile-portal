@@ -5,6 +5,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAppState } from '../../src/app-state';
 import { palette } from '../../src/careermap-data';
 import { AppHeader } from '../../src/app-header';
+import FloatingContactActions from '../../src/components/FloatingContactActions';
 export default function DrawerRoot() {
     const { preferences, unreadNotificationsCount } = useAppState();
     const renderDrawerIcon = (name) => {
@@ -107,5 +108,6 @@ export default function DrawerRoot() {
             headerShown: false,
         }}/>
       </Drawer>
+      <FloatingContactActions />
     </GestureHandlerRootView>);
 }
