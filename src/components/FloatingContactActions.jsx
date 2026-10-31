@@ -39,9 +39,8 @@ export default function FloatingContactActions() {
     <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
       <View style={{ flex: 1, justifyContent: 'center', padding: 22, backgroundColor: 'rgba(0,0,0,0.5)' }}>
         <View style={{ borderRadius: 18, padding: 20, backgroundColor: dark ? '#111' : '#fff' }}>
-          <Text style={{ fontSize: 19, fontWeight: '800', color: dark ? '#fff' : palette.text, marginBottom: 8 }}>Send us a message</Text>
-          <Text style={{ fontSize: 13, color: dark ? '#bbb' : '#776b67', marginBottom: 14 }}>Your account name, email, and phone will be included.</Text>
-          <TextInput multiline value={messageText} onChangeText={setMessageText} maxLength={5000} placeholder="Write your message" placeholderTextColor={dark ? '#777' : '#a89a94'} textAlignVertical="top" style={{ minHeight: 120, borderWidth: 1, borderColor: '#ddc9c4', borderRadius: 12, padding: 12, color: dark ? '#fff' : palette.text }} />
+          <Text style={{ fontSize: 19, fontWeight: '800', color: dark ? '#fff' : palette.text, marginBottom: 8 }}>How Can We Help You?</Text>
+           <TextInput multiline value={messageText} onChangeText={setMessageText} maxLength={5000} placeholder="Write your message" placeholderTextColor={dark ? '#777' : '#a89a94'} textAlignVertical="top" style={{ minHeight: 120, borderWidth: 1, borderColor: '#ddc9c4', borderRadius: 12, padding: 12, color: dark ? '#fff' : palette.text }} />
           <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 16 }}>
             <Pressable onPress={() => setOpen(false)} style={{ paddingHorizontal: 14, paddingVertical: 10 }}><Text style={{ color: palette.primary, fontWeight: '700' }}>Cancel</Text></Pressable>
             <Pressable disabled={!messageText.trim() || sending} onPress={submitMessage} style={{ paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10, backgroundColor: !messageText.trim() || sending ? '#c9918b' : palette.primary }}><Text style={{ color: '#fff', fontWeight: '700' }}>{sending ? 'Sending...' : 'Send message'}</Text></Pressable>
