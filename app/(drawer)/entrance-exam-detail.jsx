@@ -110,12 +110,13 @@ export default function EntranceExamDetailScreen() {
                 <DetailCard title="">
                     {exam.aboutHtml ? (
                         <RenderHTML
-                            contentWidth={screenWidth - 40}
+                            contentWidth={Math.max(220, screenWidth - 80)}
                             source={{ html: exam.aboutHtml }}
                             baseStyle={{
                                 color: preferences.darkMode ? '#b7aeb9' : palette.muted,
                                 fontSize: 14,
                                 lineHeight: 22,
+                                textAlign: 'left',
                             }}
                             tagsStyles={{
                                 h1: { fontSize: 20, fontWeight: '900', color: palette.primary, marginVertical: 8 },
@@ -124,8 +125,8 @@ export default function EntranceExamDetailScreen() {
                                 h4: { fontSize: 15, fontWeight: '800', color: palette.primary, marginVertical: 6 },
                                 h5: { fontSize: 14, fontWeight: '800', color: palette.primary, marginVertical: 5 },
                                 h6: { fontSize: 13, fontWeight: '800', color: palette.primary, marginVertical: 5 },
-                                p: { marginVertical: 4 },
-                                li: { marginVertical: 3 },
+                                p: { marginVertical: 4, textAlign: 'left' },
+                                li: { marginVertical: 3, textAlign: 'left' },
                                 ul: { marginVertical: 6, paddingLeft: 18 },
                                 ol: { marginVertical: 6, paddingLeft: 18 },
                                 table: { marginVertical: 8 },
@@ -136,7 +137,7 @@ export default function EntranceExamDetailScreen() {
                             }}
                         />
                     ) : (
-                        <Text className={`text-[14px] leading-6 ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>
+                        <Text className={`text-left text-[14px] leading-6 ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>
                             {exam.about || 'Description not available.'}
                         </Text>
                     )}

@@ -1,4 +1,5 @@
 import api from './axios';
+import { isComingSoonDeadline } from '../utils/deadlineStatus';
 
 function stripHtml(value) {
   if (!value) {
@@ -95,6 +96,7 @@ function mapScholarshipItem(item, index) {
    eligibility: formatEligibility(item?.eligibility),
     amount: formatAmount(item?.price),
     deadline: formatDeadline(item?.deadline),
+    comingSoon: isComingSoonDeadline(item?.deadline),
     tag: scholarshipType,
     status: getScholarshipStatus(item?.deadline),
     provider: scholarshipType,

@@ -7,6 +7,7 @@ import api from '../../../src/api/axios';
 import { createMentorReview } from '../../../src/api/mentorApi';
 import { checkModuleAccess, getModules } from '../../../src/api/moduleAccessApi';
 import { useAppState } from '../../../src/app-state';
+import { isComingSoonDeadline } from '../../../src/utils/deadlineStatus';
 import { featuredInstitutes, featuredScholarships, moduleCards, palette } from '../../../src/careermap-data';
 import { AnimatedPressable, Pill, Screen, SectionHeader, UnlockBottomSheet } from '../../../src/careermap-ui';
 import { useAuthStore } from '../../../src/store/auth-store';
@@ -401,6 +402,7 @@ export default function HomeScreen() {
       name: exam.examname || 'Entrance Exam',
       date: exam.issuedate || '',
       lastDate: exam.lastdate || '',
+      comingSoon: isComingSoonDeadline(exam.lastdate),
       image: exam.image || null,
       accent: mentorAccentPalette[index % mentorAccentPalette.length],
     }));
@@ -418,6 +420,7 @@ export default function HomeScreen() {
         month: 'short',
         year: 'numeric',
       }) : '',
+      comingSoon: isComingSoonDeadline(item.deadline),
       tag: item.type || '',
     }));
   }, [dashboardData?.scholarships]);
@@ -848,6 +851,7 @@ export default function HomeScreen() {
           <Text numberOfLines={1} ellipsizeMode="tail" className="text-[12px] font-bold text-success">{item.amount}</Text>
         </View>
         <View className="items-end gap-1">
+          {item.comingSoon ? <Pill label="Coming soon" tone={palette.orange} /> : null}
           <Pill label={item.tag} tone={palette.primary} />
           <Text numberOfLines={1} ellipsizeMode="tail" className={`text-[11px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{item.deadline}</Text>
         </View>
@@ -875,6 +879,7 @@ export default function HomeScreen() {
           </View>
           <View className="w-full flex-1 justify-start">
             <Text numberOfLines={3} ellipsizeMode="tail" className={`w-full text-center text-[13px] leading-[18px] font-extrabold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{exam.name}</Text>
+            {exam.comingSoon ? <View className="mt-1 self-center rounded-full bg-[#fff1c2] px-2 py-1"><Text className="text-[8px] font-extrabold uppercase text-[#9a4a00]">Coming soon</Text></View> : null}
           </View>
         
           </AnimatedPressable>);

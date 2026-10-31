@@ -853,6 +853,7 @@ if (typeFilter !== 'All') {
                                 <Text numberOfLines={2} className={`text-[15px] font-extrabold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{item.name}</Text>
                                 <Text className={`text-[12px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{item.provider}</Text>
                                 <Text className="text-[15px] font-black text-success">{item.amount}</Text>
+                                {item.comingSoon ? <View className="self-start rounded-full bg-[#fff1c2] px-2.5 py-1"><Text className="text-[9px] font-extrabold uppercase text-[#9a4a00]">Coming soon</Text></View> : null}
                             </View>
                         </View>
                     </AnimatedPressable>

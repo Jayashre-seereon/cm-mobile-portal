@@ -9,6 +9,13 @@ import { checkModuleAccess, getModules } from '../../src/api/moduleAccessApi';
 import { AnimatedPressable, Screen, SectionHeader, UnlockBottomSheet } from '../../src/careermap-ui';
 import { openSubscriptionPrompt } from '../../src/subscription-flow';
 import { useSearchDeepLink } from '../../src/utils/searchNavigation';
+import { isComingSoonDeadline } from '../../src/utils/deadlineStatus';
+const normalizeExamName = (value = '') => String(value).toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
+const getExamFamily = (value = '') => {
+    const normalized = normalizeExamName(value);
+    const family = normalized.match(/^(cuet(?:pg|ug)|neet(?:pg|ug)|jee(?:main|advanced)|gate|cat|clat|upsc|ssc|ibps|nda|nata|bitsat|cet)/);
+    return family?.[1] || normalized;
+};
 export default function EntranceExamScreen() {
     const params = useLocalSearchParams();
     const { preferences } = useAppState();
@@ -128,11 +135,12 @@ const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
         }
         setModeFilter('All');
         setCategoryFilter('All');
-        setSelectedExamId(examId);
+        const selected = entranceExams.find((exam) => String(exam.id) === examId);
+        setSelectedExamId(getExamFamily(selected?.name));
         setShowFilters(true);
     });
 
-  const modeOptions = ['All', 'Government', 'Private'];
+  const modeOptions = useMemo(() => ['All', ...new Set(entranceExams.map((exam) => String(exam.mode || '').trim()).filter(Boolean))], [entranceExams]);
    
 function getOptionValue(option) {
     return String(option?.value ?? option?.id ?? option?.label ?? option ?? '');
@@ -144,9 +152,9 @@ const categoryOptions = useMemo(() => {
     return Array.isArray(categories) ? categories : [];
 }, [categories]);
    const searchableExams = useMemo(() => {
-    const query = examSearchQuery.trim().toLowerCase();
+    const query = normalizeExamName(examSearchQuery.trim());
     if (!query) return entranceExams;
-    return entranceExams.filter((exam) => String(exam.name || '').toLowerCase().includes(query));
+    return entranceExams.filter((exam) => normalizeExamName(exam.name).includes(query));
 }, [entranceExams, examSearchQuery]);
 const searchableCategoryOptions = useMemo(() => {
     const query = categorySearchQuery.trim().toLowerCase();
@@ -166,8 +174,7 @@ const filtered = useMemo(() => {
     if (modeFilter !== 'All') {
         source = source.filter(
             (exam) =>
-                String(exam.mode || '').toLowerCase() ===
-                String(modeFilter).toLowerCase()
+                normalizeExamName(exam.mode) === normalizeExamName(modeFilter)
         );
     }
 
@@ -175,7 +182,7 @@ const filtered = useMemo(() => {
     if (categoryFilter !== 'All') {
         source = source.filter(
             (exam) =>
-                String(exam.categoryId) === String(categoryFilter)
+                String(exam.categoryId ?? exam.categoryObj?.id) === String(categoryFilter)
         );
     }
 
@@ -183,7 +190,7 @@ const filtered = useMemo(() => {
     if (selectedExamId) {
         source = source.filter(
             (exam) =>
-                String(exam.id) === String(selectedExamId)
+                getExamFamily(exam.name) === String(selectedExamId)
         );
     }
 
@@ -231,7 +238,7 @@ const filtered = useMemo(() => {
                     className={`flex-1 text-[13px] font-semibold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}
                 >
                     {selectedExamId
-                        ? entranceExams.find((exam) => String(exam.id) === String(selectedExamId))?.name || 'Search Exam'
+                        ? entranceExams.find((exam) => getExamFamily(exam.name) === String(selectedExamId))?.name || 'Search Exam'
                         : 'Search Exam'}
                 </Text>
                 <Ionicons
@@ -279,7 +286,7 @@ const filtered = useMemo(() => {
                                 <Pressable
                                     key={exam.id}
                                     onPress={() => {
-                                        setSelectedExamId(exam.id);
+                                        setSelectedExamId(getExamFamily(exam.name));
                                         setExamSearchQuery('');
                                         setShowExamDropdown(false);
                                     }}
@@ -288,7 +295,7 @@ const filtered = useMemo(() => {
                                     <Text
                                         numberOfLines={1}
                                         className={`text-[13px] font-semibold ${
-                                            String(exam.id) === String(selectedExamId)
+                                            getExamFamily(exam.name) === String(selectedExamId)
                                                 ? 'text-brand'
                                                 : preferences.darkMode
                                                 ? 'text-white'
@@ -540,6 +547,9 @@ setShowCategoryDropdown(false);
                                             Last: {exam.lastDate}
                                         </Text>
                                     </View>
+                                    {isComingSoonDeadline(exam.lastDateRaw) ? <View className="rounded-[10px] bg-[#fff1c2] px-2 py-1"><Text className="text-[9px] font-extrabold uppercase text-[#9a4a00]">Coming soon</Text></View> : null}
+                                </View>
+                                <View className="flex-row justify-end gap-3 border-t border-line pt-1">
                                     <AnimatedPressable
                                         onPress={(e) => {
                                             e.stopPropagation();
