@@ -1048,7 +1048,7 @@ export default function CareerLibraryScreen() {
       {/* Details grid */}
       <View className="px-3 py-2.5">
         {[
-          { label: 'Stream', value: detail?.stream?.name },
+          { label: 'Stream', value: pathItem?.stream || detail?.stream?.name },
           { label: 'Graduation', value: pathItem?.graduation },
           { label: 'After Graduation', value: pathItem?.aftergraduation },
           { label: 'After Post Graduation', value: pathItem?.afterpostgraduation },
