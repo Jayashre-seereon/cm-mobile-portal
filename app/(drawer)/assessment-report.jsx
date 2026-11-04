@@ -267,7 +267,8 @@ function DetailCardRow({ num, title, color = 'red', desc, traits, enjoys, enviro
     >
       <View
         style={{
-          width: 95,
+          width: 140,
+          flexShrink: 0,
           backgroundColor: badgeBg,
           padding: 8,
           alignItems: 'center',
@@ -289,10 +290,14 @@ function DetailCardRow({ num, title, color = 'red', desc, traits, enjoys, enviro
         </View>
         <Text
           style={{
+            width: '100%',
+            flexShrink: 1,
             color: '#ffffff',
             fontFamily: 'Poppins_800ExtraBold', fontWeight: '800',
             fontSize: 10.9,
             textAlign: 'center',
+            lineHeight: 13,
+            flexWrap: 'wrap',
             letterSpacing: 0.4,
             textTransform: 'uppercase',
           }}
@@ -348,7 +353,8 @@ function TraitCardRow({ num, name, band, text, color = 'green' }) {
     >
       <View
         style={{
-          width: 125,
+          width: 170,
+          flexShrink: 0,
           backgroundColor: badgeBg,
           padding: 8,
           alignItems: 'center',
@@ -370,6 +376,11 @@ function TraitCardRow({ num, name, band, text, color = 'green' }) {
           </View>
           <Text
             style={{
+              flex: 1,
+              flexShrink: 1,
+              textAlign: 'center',
+              flexWrap: 'wrap',
+              lineHeight: 12.5,
               color: '#ffffff',
               fontFamily: 'Poppins_800ExtraBold', fontWeight: '800',
               fontSize: 10.4,
