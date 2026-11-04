@@ -420,13 +420,14 @@ function TraitCardRow({ num, name, band, text, color = 'green' }) {
 
 // Banner Component for Score Representation
 function ScoreRepBanner({ title, color = 'red' }) {
+  const isLavender = color === 'lavender';
   const bg =
     color === 'green'
       ? COLORS.green
       : color === 'dark-green'
       ? COLORS.greenDark
-      : color === 'lavender'
-      ? COLORS.lavender
+      : isLavender
+      ? '#CBC5E3'
       : color === 'gold'
       ? COLORS.gold
       : COLORS.red;
@@ -436,21 +437,22 @@ function ScoreRepBanner({ title, color = 'red' }) {
       style={{
         flexDirection: 'row',
         alignItems: 'center',
-        alignSelf: 'flex-start',
+        alignSelf: 'center',
         backgroundColor: bg,
-        borderRadius: 8,
-        paddingVertical: 6,
-        paddingHorizontal: 12,
-        marginBottom: 12,
+        borderRadius: 999,
+        paddingVertical: 8,
+        paddingHorizontal: 30,
+        marginTop: 6,
+        marginBottom: 22,
         gap: 8,
       }}
     >
-      <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: '#ffffff' }} />
+      <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: isLavender ? '#5E7399' : '#ffffff' }} />
       <Text
         style={{
-          color: '#ffffff',
+          color: isLavender ? '#241D3B' : '#ffffff',
           fontFamily: 'Poppins_800ExtraBold', fontWeight: '800',
-          fontSize: 12.1,
+          fontSize: 13.3,
           letterSpacing: 0.5,
           textTransform: 'uppercase',
         }}
@@ -462,7 +464,7 @@ function ScoreRepBanner({ title, color = 'red' }) {
 }
 
 // Donut Gauge Component for Learning Styles & Goal Orientation
-function DonutGauge({ percent, color, trackColor, size = 90, strokeWidth = 8, textColor = '#1E232A' }) {
+function DonutGauge({ percent, color, trackColor, size = 128, strokeWidth = 18, textColor = '#1E232A' }) {
   const radius = (size - strokeWidth) / 2;
   const circumference = 2 * Math.PI * radius;
   const strokeDashoffset = circumference - (percent / 100) * circumference;
@@ -490,7 +492,7 @@ function DonutGauge({ percent, color, trackColor, size = 90, strokeWidth = 8, te
         />
       </Svg>
       <View style={{ position: 'absolute', alignItems: 'center', justifyContent: 'center' }}>
-        <Text style={{ fontSize: 18.4, fontFamily: 'Poppins_900Black', fontWeight: '900', color: textColor }}>{percent}%</Text>
+        <Text style={{ fontSize: 24, fontFamily: 'Poppins_900Black', fontWeight: '900', color: textColor }}>{percent}%</Text>
       </View>
     </View>
   );
@@ -1186,12 +1188,13 @@ const totalH = 32 * (PAGE_H + PAGE_GAP);
     { facet: 'C', label: 'CONVENTIONAL' },
   ], interestScoreMap));
 
-  const topLearningStyles = aboveMin(rankDomainFacets(domainVark, [
+  const learningStyleScores = rankDomainFacets(domainVark, [
     { facet: 'V', label: 'VISUAL' },
     { facet: 'A', label: 'AUDITORY' },
     { facet: 'Rd', label: 'READING / WRITING' },
     { facet: 'K', label: 'KINAESTHETIC' },
-  ], varkScoreMap));
+  ], varkScoreMap);
+  const topLearningStyles = aboveMin(learningStyleScores);
 
   const topWorkValues = aboveMin(rankDomainFacets(domainValues, [
     { facet: 'OC', label: 'OPENNESS TO CHANGE' },
@@ -2540,14 +2543,14 @@ useEffect(() => {
 
           {/* 4 Donut Gauges */}
        {/* 4 Donut Gauges — driven by varkScoreMap */}
-<View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-around', marginVertical: 14, gap: 16 }}>
+<View style={{ width: '100%', maxWidth: 448, alignSelf: 'center', flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 40, marginVertical: 14 }}>
   {[
     { key: 'V', label: 'VISUAL', val: varkScoreMap.V, color: '#466CA3', track: '#DDE7F3', text: '#1E3A8A' },
     { key: 'A', label: 'AUDITORY', val: varkScoreMap.A, color: COLORS.green, track: '#E2EBE0', text: '#154512' },
     { key: 'Rd', label: 'READING', val: varkScoreMap.Rd, color: '#B58E2E', track: '#F3EDE0', text: '#5C450A' },
     { key: 'K', label: 'KINAESTHETIC', val: varkScoreMap.K, color: '#9A4235', track: '#F6E7E5', text: '#691811' },
   ].map((item) => (
-    <View key={item.key} style={{ alignItems: 'center' }}>
+    <View key={item.key} style={{ width: '48%', alignItems: 'center' }}>
       <DonutGauge percent={item.val} color={item.color} trackColor={item.track} textColor={item.text} />
       <Text style={{ marginTop: 6, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800', fontSize: 12.6, color: COLORS.dark }}>{item.label}</Text>
     </View>
@@ -2565,29 +2568,33 @@ useEffect(() => {
   <View
     style={{
       flexDirection: 'row',
+      flexWrap: 'wrap',
       justifyContent: 'space-between',
       alignItems: 'stretch',
+      alignSelf: 'center',
       marginTop: 4,
       width: '100%',
+      maxWidth: 560,
+      rowGap: 14,
     }}
   >
-    {topLearningStyles.slice(0, 4).map((style) => (
+    {learningStyleScores.map((style) => (
       <View
         key={style.facet}
         style={{
-          width: '23.5%',
+          width: '48%',
           minHeight: 42,
-          paddingHorizontal: 4,
-          paddingVertical: 8,
-          backgroundColor: COLORS.lavender,
-          borderRadius: 7,
+          paddingHorizontal: 10,
+          paddingVertical: 12,
+          backgroundColor: '#CBC5E3',
+          borderRadius: 12,
           alignItems: 'center',
           justifyContent: 'center',
         }}
       >
         <Text
           style={{
-            color: '#ffffff',
+            color: '#241D3B',
             fontFamily: 'Poppins_800ExtraBold', fontWeight: '800',
             fontSize: 10.9,
             letterSpacing: 0.2,
