@@ -6,7 +6,8 @@ import {
   Modal,
   Platform,
   ScrollView,
-  Text,
+  StyleSheet,
+  Text as NativeText,
   TouchableOpacity,
   View,
   PixelRatio,
@@ -26,6 +27,16 @@ import { getAttemptResult } from '../../src/api/psychometricAssessmentApi';
 import { CLUSTERS, pct } from '../../src/features/assessment/data/careerCompassData';
 import { SAMPLE_PROFILING_REPORT } from '../../src/features/assessment/data/assessmentConstants';
 import YourProfilingReport from '../../src/features/assessment/components/YourProfilingReport';
+
+const Text = ({ style, ...props }) => {
+  const resolvedStyle = StyleSheet.flatten(style) || {};
+  const size = Number(resolvedStyle.fontSize);
+  const scale = size > 0 ? (size <= 14 ? 1.2 : size <= 18 ? 1.08 : 1) : 1;
+  const scaledTypography = size > 0
+    ? { fontSize: size * scale, ...(resolvedStyle.lineHeight ? { lineHeight: resolvedStyle.lineHeight * scale } : {}) }
+    : {};
+  return <NativeText {...props} style={[{ fontFamily: 'Poppins_400Regular' }, resolvedStyle, scaledTypography]} />;
+};
 
 // Image Assets
 const Logo = require('../../assets/images/logo_white.png');
@@ -74,13 +85,7 @@ const COLORS = {
   pageBg: '#EAEFF4',
 };
 
-// Scale report typography up slightly while keeping headings' existing hierarchy.
-const REPORT_TEXT_SCALE = 1.15;
-const reportText = (style) => ({
-  ...style,
-  fontSize: style.fontSize * REPORT_TEXT_SCALE,
-  ...(style.lineHeight ? { lineHeight: style.lineHeight * REPORT_TEXT_SCALE } : {}),
-});
+const reportText = (style) => style;
 
 // 32 Pages List for Jump Navigation (Page 3 is Your Profiling)
 const REPORT_PAGES = [
@@ -121,7 +126,7 @@ const REPORT_PAGES = [
 // Common Header for Pages 2 to 31
 function PageHeader({ studentFirstName }) {
   return (
-    <View style={{ marginBottom: 14 }}>
+    <View style={{ marginBottom: 18 }}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 6 }}>
         <Text style={reportText({ fontSize: 17.2, fontFamily: 'Poppins_700Bold', fontWeight: '700', color: COLORS.dark })}>
           {studentFirstName || 'Aryaman'}
@@ -140,7 +145,7 @@ function PageHeader({ studentFirstName }) {
 // Common Footer for Pages 2 to 31
 function PageFooter({ pageNum }) {
   return (
-    <View style={{ marginTop: 'auto', paddingTop: 16 }}>
+    <View style={{ marginTop: 'auto', paddingTop: 12 }}>
       <View style={{ height: 1, backgroundColor: COLORS.line, width: '100%', marginBottom: 8 }} />
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
@@ -595,7 +600,7 @@ function TopClustersMap({ clusters }) {
       }}
     >
       <View style={{ width: '52%', alignItems: 'center', justifyContent: 'center' }}>
-        <Image source={ReportImg7} style={{ width: '100%', height: 210 }} resizeMode="contain" />
+        <Image source={ReportImg7} style={{ width: '100%', height: 258 }} resizeMode="contain" />
       </View>
 
    <View style={{ width: 20, height: 164, marginLeft: -40, justifyContent: 'center' }} pointerEvents="none">
@@ -727,9 +732,10 @@ function generateReportHtml(data) {
   <meta charset="utf-8">
   <title>CareerMap Assessment Report - ${studentName}</title>
   <style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800;900&display=swap');
     @page { size: A4; margin: 0; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body { font-family: Arial, sans-serif; color: #374151; margin: 0; padding: 0; font-size: 13px; line-height: 1.55; background: #ffffff; }
+    body { font-family: 'Poppins', Arial, sans-serif; color: #374151; margin: 0; padding: 0; font-size: 13px; line-height: 1.55; background: #ffffff; }
     .pdf-page p, .pdf-page .cluster-body, .pdf-page article p { text-align: justify; }
     .pdf-page { page-break-after: always; break-after: page; padding: 13mm 14mm 12mm; height: 297mm; min-height: 297mm; position: relative; display: flex; flex-direction: column; overflow: hidden; }
     .pdf-page:last-child { page-break-after: auto; break-after: auto; }
@@ -1004,7 +1010,7 @@ const { width: windowWidth } = useWindowDimensions();
 // Design canvas = A4 at 96dpi. The phone only scales it down visually.
 const PAGE_W = 794;
 const PAGE_H = 1123;
-const PAGE_GAP = 24;
+const PAGE_GAP = 32;
 const cardWidth = PAGE_W;
 const cardHeight = PAGE_H;
 const viewScale = Math.min(1, (windowWidth - 24) / PAGE_W);
@@ -1578,8 +1584,9 @@ useEffect(() => {
   backgroundColor: '#ffffff',
   borderRadius: 0,         // was 6 (rounded corners turn black in the JPG capture)
   marginBottom: PAGE_GAP,
-  paddingHorizontal: 40,
-  paddingVertical: 32,
+  paddingHorizontal: 48,
+  paddingTop: 36,
+  paddingBottom: 24,
   display: 'flex',
   flexDirection: 'column',
   fontFamily: 'Poppins_400Regular',
@@ -1714,8 +1721,9 @@ useEffect(() => {
     position: 'relative',
     overflow: 'hidden',
     minHeight: cardHeight,   // <-- add this
-    paddingHorizontal: cardWidth > 600 ? 36 : 18,
-    paddingVertical: cardWidth > 600 ? 30 : 18,
+    paddingHorizontal: 48,
+    paddingTop: 36,
+    paddingBottom: 24,
     fontSize: 13.8,
   }]}
   onLayout={(e) => recordPageLayout(1, e)}
@@ -1831,7 +1839,7 @@ useEffect(() => {
 <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', zIndex: 10 }}>
   <Image
     source={ReportImg9}
-    style={{ width: cardWidth > 600 ? 340 : 250, height: cardWidth > 600 ? 280 : 190 }}
+    style={{ width: 430, height: 390 }}
     resizeMode="contain"
   />
 </View>
@@ -2024,7 +2032,7 @@ useEffect(() => {
           <View style={{ alignItems: 'center', justifyContent: 'center', marginVertical: 14 }}>
             <Image
               source={ReportImg1}
-              style={{ width: '100%', height: cardWidth > 600 ? 350 : 230 }}
+              style={{ width: '100%', maxWidth: 540, height: 500 }}
               resizeMode="contain"
             />
           </View>
@@ -2059,7 +2067,7 @@ useEffect(() => {
           <View style={{ alignItems: 'center', justifyContent: 'center', marginVertical: 10 }}>
             <Image
               source={ReportImg2}
-              style={{ width: '100%', height: cardWidth > 600 ? 330 : 220 }}
+              style={{ width: '100%', maxWidth: 620, height: 440 }}
               resizeMode="contain"
             />
           </View>
@@ -2278,7 +2286,7 @@ useEffect(() => {
           <View style={{ alignItems: 'center', justifyContent: 'center', marginVertical: 10 }}>
             <Image
               source={ReportImg3}
-              style={{ width: '100%', height: 260 }}
+              style={{ width: '100%', maxWidth: 600, height: 380 }}
               resizeMode="contain"
             />
           </View>
@@ -2428,7 +2436,7 @@ useEffect(() => {
           <View style={{ alignItems: 'center', justifyContent: 'center', marginVertical: 8 }}>
             <Image
               source={ReportImg4}
-              style={{ width: '100%', height: 260 }}
+              style={{ width: '100%', maxWidth: 590, height: 380 }}
               resizeMode="contain"
             />
           </View>
@@ -2617,7 +2625,7 @@ useEffect(() => {
           <View style={{ alignItems: 'center', justifyContent: 'center', marginVertical: 8 }}>
             <Image
               source={ReportImg5}
-              style={{ width: '100%', height: 220 }}
+              style={{ width: '100%', height: 380 }}
               resizeMode="contain"
             />
           </View>
@@ -2941,16 +2949,16 @@ useEffect(() => {
             In this test, we assess six types of aptitudes:
           </Text>
 
-                   <View style={{ alignItems: 'center', justifyContent: 'center', marginVertical: 6, height: 95, overflow: 'hidden' }}>
+          <View style={{ alignItems: 'center', justifyContent: 'center', alignSelf: 'center', width: '100%', maxWidth: 540, marginVertical: 6, height: 360, overflow: 'hidden' }}>
             <Image
               source={ReportImg6}
-              style={{ width: '100%', height: '100%', transform: [{ scale: 1.9 }] }}
+              style={{ width: '100%', height: '100%' }}
               resizeMode="contain"
             />
           </View>
 
           {/* 4 Summary Cards */}
-          <View style={{ gap: 8, marginTop: 6 }}>
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 8, marginTop: 6 }}>
             {[
               {
                 title: 'MECHANICAL APTITUDE',
@@ -2977,6 +2985,7 @@ useEffect(() => {
                   borderRadius: 10,
                   overflow: 'hidden',
                   backgroundColor: COLORS.redLight,
+                  width: '48.5%',
                 }}
               >
                 <View style={{ backgroundColor: COLORS.red, paddingVertical: 4, alignItems: 'center' }}>
@@ -3385,7 +3394,7 @@ useEffect(() => {
           <View style={{ alignItems: 'center', justifyContent: 'center', marginVertical: 6 }}>
             <Image
               source={ReportImg8}
-              style={{ width: '100%', height: 130 }}
+              style={{ width: '100%', maxWidth: 560, height: 226 }}
               resizeMode="contain"
             />
           </View>

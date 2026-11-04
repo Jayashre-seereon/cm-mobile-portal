@@ -1,6 +1,16 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text as NativeText, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+
+const Text = ({ style, ...props }) => {
+  const resolvedStyle = StyleSheet.flatten(style) || {};
+  const size = Number(resolvedStyle.fontSize);
+  const scale = size > 0 ? (size <= 11 ? 1.1 : size <= 14 ? 1.2 : size <= 18 ? 1.08 : 1) : 1;
+  const scaledTypography = size > 0
+    ? { fontSize: size * scale, ...(resolvedStyle.lineHeight ? { lineHeight: resolvedStyle.lineHeight * scale } : {}) }
+    : {};
+  return <NativeText {...props} style={[{ fontFamily: 'Poppins_400Regular' }, resolvedStyle, scaledTypography]} />;
+};
 
 /**
  * 5 Standard Planning Stages definition
@@ -182,7 +192,7 @@ export default function YourProfilingReport({
       nativeID={`page-${pageNum}`}
       dataSet={{ reportPage: 'true' }}
       className="pdf-page report-page-a4"
-    style={[cardStyle, { fontSize: 14, paddingVertical: 20 }]}
+      style={cardStyle}
       onLayout={(e) => {
         if (typeof recordPageLayout === 'function') {
           recordPageLayout(pageNum, e);
@@ -454,9 +464,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   introParagraph: {
-    fontSize: 12,  
+    fontSize: 10.8,
     color: '#374151',
-    lineHeight: 15.5,
+    lineHeight: 16.25,
     fontFamily: 'Poppins_500Medium',
     fontWeight: '500',
     marginBottom: 4,
