@@ -235,6 +235,7 @@ const [resolvedModuleId, setResolvedModuleId] = useState(() => {
                     day: item.day,
                     date: item.date,
                     month: item.month,
+                    year: item.year || (item.key ? new Date(`${item.key}T00:00:00`).getFullYear().toString() : ''),
                     slots: Array.isArray(item.slots) ? item.slots : [],
                     available: getFutureSlots(item.key, item.slots).length > 0,
                 }))
@@ -249,6 +250,7 @@ const [resolvedModuleId, setResolvedModuleId] = useState(() => {
                 day: current.toLocaleDateString('en-IN', { weekday: 'short' }),
                 date: current.getDate().toString(),
                 month: current.toLocaleDateString('en-IN', { month: 'short' }),
+                year: current.getFullYear().toString(),
                 available: index % 4 !== 1,
             };
         });
@@ -1026,6 +1028,7 @@ const filteredMentors = useMemo(() => {
                                         <Text className="text-[10px] font-bold" style={{ color: selectedDate === date.key ? '#fff' : palette.muted }}>{date.day}</Text>
                                         <Text className="text-[17px] font-black" style={{ color: selectedDate === date.key ? '#fff' : palette.text }}>{date.date}</Text>
                                         <Text className="text-[10px] font-bold" style={{ color: selectedDate === date.key ? '#fff' : palette.muted }}>{date.month}</Text>
+                                        <Text className="text-[9px] font-bold" style={{ color: selectedDate === date.key ? '#fff' : palette.muted }}>{date.year}</Text>
                                     </Pressable>))}
                             </View>
                         </View>
