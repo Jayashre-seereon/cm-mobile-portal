@@ -275,9 +275,35 @@ const mapStreamItem = (item, index = 0) => {
         raw: item,
     };
 };
+const STREAM_DISPLAY_ORDER = ['Science', 'Commerce', 'Arts & Humanities', 'Neutral', 'Competitive', 'Vocational'];
+const normalizeStreamOrderKey = (value) => {
+    const normalized = String(value || '')
+        .trim()
+        .toLowerCase()
+        .replace(/&/g, 'and')
+        .replace(/\s+/g, ' ');
+
+    if (normalized === 'arts and humanities') {
+        return 'arts and humanities';
+    }
+
+    return normalized;
+};
+const STREAM_ORDER_KEYS = STREAM_DISPLAY_ORDER.map((label) => normalizeStreamOrderKey(label));
 const normalizeStreamItems = (items) => {
     const source = Array.isArray(items) && items.length > 0 ? items : fallbackStreams;
-    return source.map((item, index) => mapStreamItem(item, index));
+    return source
+        .map((item, index) => mapStreamItem(item, index))
+        .sort((a, b) => {
+            const aIndex = STREAM_ORDER_KEYS.indexOf(normalizeStreamOrderKey(a?.name));
+            const bIndex = STREAM_ORDER_KEYS.indexOf(normalizeStreamOrderKey(b?.name));
+            const safeA = aIndex === -1 ? Number.MAX_SAFE_INTEGER : aIndex;
+            const safeB = bIndex === -1 ? Number.MAX_SAFE_INTEGER : bIndex;
+            if (safeA !== safeB) {
+                return safeA - safeB;
+            }
+            return String(a?.name || '').localeCompare(String(b?.name || ''));
+        });
 };
 const getCardTitle = (item) => item?.name || item?.title || item?.subcategory?.title || item?.secondcategory?.name || item?.category?.title || item?.path || item?.examname || item?.pathName || `Item ${item?.id ?? ''}`.trim();
 const getCardDescription = (item) => stripHtml(item?.desc || item?.description || item?.about || item?.specialization || item?.subcategory?.description || item?.secondcategory?.description || item?.category?.description || item?.path || '');
