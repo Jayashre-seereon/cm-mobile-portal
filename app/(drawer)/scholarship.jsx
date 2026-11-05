@@ -288,6 +288,15 @@ if (typeFilter !== 'All') {
         source.sort((a, b) => a.name.localeCompare(b.name));
     } else if (sortBy === 'Z-A') {
         source.sort((a, b) => b.name.localeCompare(a.name));
+    } else if (activeStatus === 'All') {
+        source.sort((a, b) => (a.status === 'Expired' ? 1 : 0) - (b.status === 'Expired' ? 1 : 0));
+        source.sort((a, b) => {
+            if (a.status !== 'Active' || b.status !== 'Active') return 0;
+            const aCreatedAt = a.createdAt ? new Date(a.createdAt).getTime() : Number.NaN;
+            const bCreatedAt = b.createdAt ? new Date(b.createdAt).getTime() : Number.NaN;
+            if (Number.isNaN(aCreatedAt) || Number.isNaN(bCreatedAt)) return 0;
+            return bCreatedAt - aCreatedAt;
+        });
     }
 
     return source;
@@ -540,6 +549,22 @@ if (typeFilter !== 'All') {
                     </AnimatedPressable>
                 }
             />
+
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} className="-mx-1">
+                <View className="flex-row gap-2 px-1">
+                    {['All', 'Active', 'Expired'].map((status) => (
+                        <Pressable
+                            key={status}
+                            onPress={() => setActiveStatus(status)}
+                            className={`rounded-full px-4 py-2.5 ${activeStatus === status ? 'bg-brand' : preferences.darkMode ? 'bg-[#111111]' : 'bg-[#f2ebe6]'}`}
+                        >
+                            <Text className={`text-[12px] font-extrabold ${activeStatus === status ? 'text-white' : preferences.darkMode ? 'text-white' : 'text-ink'}`}>
+                                {status}
+                            </Text>
+                        </Pressable>
+                    ))}
+                </View>
+            </ScrollView>
 
          {showFilters ? (
     <View className="gap-3">
