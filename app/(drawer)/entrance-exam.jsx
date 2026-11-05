@@ -136,7 +136,7 @@ const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
         setModeFilter('All');
         setCategoryFilter('All');
         const selected = entranceExams.find((exam) => String(exam.id) === examId);
-        setSelectedExamId(getExamFamily(selected?.name));
+        setSelectedExamId(String(selected.id));
         setShowFilters(true);
     });
 
@@ -188,10 +188,7 @@ const filtered = useMemo(() => {
 
     // Selected exam
     if (selectedExamId) {
-        source = source.filter(
-            (exam) =>
-                getExamFamily(exam.name) === String(selectedExamId)
-        );
+        source = source.filter((exam) => String(exam.id) === String(selectedExamId));
     }
 
     return source;
@@ -238,7 +235,7 @@ const filtered = useMemo(() => {
                     className={`flex-1 text-[13px] font-semibold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}
                 >
                     {selectedExamId
-                        ? entranceExams.find((exam) => getExamFamily(exam.name) === String(selectedExamId))?.name || 'Search Exam'
+                        ? entranceExams.find((exam) => String(exam.id) === String(selectedExamId))?.name || 'Search Exam'
                         : 'Search Exam'}
                 </Text>
                 <Ionicons
@@ -286,7 +283,7 @@ const filtered = useMemo(() => {
                                 <Pressable
                                     key={exam.id}
                                     onPress={() => {
-                                        setSelectedExamId(getExamFamily(exam.name));
+                                        setSelectedExamId(String(exam.id));
                                         setExamSearchQuery('');
                                         setShowExamDropdown(false);
                                     }}
@@ -295,7 +292,7 @@ const filtered = useMemo(() => {
                                     <Text
                                         numberOfLines={1}
                                         className={`text-[13px] font-semibold ${
-                                            getExamFamily(exam.name) === String(selectedExamId)
+                                            String(exam.id) === String(selectedExamId)
                                                 ? 'text-brand'
                                                 : preferences.darkMode
                                                 ? 'text-white'
