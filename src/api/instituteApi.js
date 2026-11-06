@@ -94,6 +94,36 @@ export async function getInstitutes({
   };
 }
 
+export async function getCareerLibraryInstitutions({
+  page = 1,
+  limit = 10,
+  categoryId = '',
+  secondcategoryId = '',
+  subcategoryId = '',
+  state = '',
+} = {}) {
+  const params = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (categoryId) params.append('categoryId', String(categoryId));
+  if (secondcategoryId) params.append('secondcategoryId', String(secondcategoryId));
+  if (subcategoryId) params.append('subcategoryId', String(subcategoryId));
+  if (state) params.append('state', state);
+
+  const response = await api.get(`/careerlibrary/institutions?${params.toString()}`);
+  const data = response?.data?.data;
+  const items = Array.isArray(data)
+    ? data
+    : Array.isArray(response?.data?.items)
+      ? response.data.items
+      : Array.isArray(response?.data)
+        ? response.data
+        : [];
+
+  return {
+    items: items.map((item, index) => mapInstituteItem(item, index)),
+    pagination: response?.data?.pagination || null,
+  };
+}
+
 export async function getInstituteById(id) {
   const response = await api.get(`/institutes/${encodeURIComponent(id)}`);
   const item = response?.data?.data;
