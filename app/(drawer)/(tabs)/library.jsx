@@ -1137,7 +1137,7 @@ export default function CareerLibraryScreen() {
           <Text className="text-[11px] font-black text-white">{pathIdx + 1}</Text>
         </View>
         <Text className={`text-[13px] font-black ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>
-          {pathItem?.path?.pathtype || pathItem?.pathName || `Path ${pathIdx + 1}`}
+          {`Path ${pathIdx + 1}`}
         </Text>
       </View>
 
