@@ -195,8 +195,8 @@ export default function SubscriptionScreen() {
           const buttonLabel = currentPlan
             ? (allowRetake ? 'Buy Retake / Subscribe Again' : 'Renew / Subscribe Again')
             : 'Choose Plan';
-          const statusLabel = !currentPlan ? '' : allowRetake && isAssessmentLockedOrCompleted ? 'Assessment Completed' : 'Active Plan';
-          const statusTone = statusLabel === 'Assessment Completed' ? '#ea872e' : palette.green;
+          const statusLabel = currentPlan && allowRetake && isAssessmentLockedOrCompleted ? 'Assessment Completed' : '';
+          const statusTone = '#ea872e';
           return (<View key={plan.id} className={`gap-3 rounded-[24px] border p-[18px] ${plan.recommended || plan.highestseller
   ? preferences.darkMode
       ? 'border-[#3a2028] bg-[#080808]'

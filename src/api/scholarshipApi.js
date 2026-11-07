@@ -1,5 +1,5 @@
 import api from './axios';
-import { isComingSoonDeadline } from '../utils/deadlineStatus';
+import { getDeadlineStatus, isComingSoonDeadline } from '../utils/deadlineStatus';
 
 function stripHtml(value) {
   if (!value) {
@@ -25,20 +25,6 @@ function formatDeadline(deadline) {
     month: 'short',
     year: 'numeric',
   });
-}
-
-function getScholarshipStatus(deadline) {
-  if (!deadline) {
-    return 'Active';
-  }
-
-  const parsedDate = new Date(deadline);
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return 'Active';
-  }
-
-  return parsedDate.getTime() >= Date.now() ? 'Active' : 'Expired';
 }
 
 function formatAmount(price) {
@@ -91,14 +77,15 @@ function mapScholarshipItem(item, index) {
 
   return {
     id: String(item?.id ?? `scholarship-${index}`),
+    createdAt: item?.createdAt ?? item?.created_at ?? item?.addedAt ?? item?.added_at ?? null,
     name: item?.name || 'Unnamed Scholarship',
     isFree: Boolean(item?.is_free ?? item?.isFree),
    eligibility: formatEligibility(item?.eligibility),
     amount: formatAmount(item?.price),
     deadline: formatDeadline(item?.deadline),
-    comingSoon: isComingSoonDeadline(item?.deadline),
+    comingSoon: getDeadlineStatus(item?.deadline) === 'Active' && isComingSoonDeadline(item?.deadline),
     tag: scholarshipType,
-    status: getScholarshipStatus(item?.deadline),
+    status: getDeadlineStatus(item?.deadline),
     provider: scholarshipType,
    description: stripHtml(item?.description) || 'Scholarship details are not available right now.',
     descriptionHtml: item?.description || '',

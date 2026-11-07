@@ -7,7 +7,7 @@ import api from '../../../src/api/axios';
 import { createMentorReview } from '../../../src/api/mentorApi';
 import { checkModuleAccess, getModules } from '../../../src/api/moduleAccessApi';
 import { useAppState } from '../../../src/app-state';
-import { isComingSoonDeadline } from '../../../src/utils/deadlineStatus';
+import { getDeadlineStatus, isComingSoonDeadline } from '../../../src/utils/deadlineStatus';
 import { featuredInstitutes, featuredScholarships, moduleCards, palette } from '../../../src/careermap-data';
 import { AnimatedPressable, Pill, Screen, SectionHeader, UnlockBottomSheet } from '../../../src/careermap-ui';
 import { useAuthStore } from '../../../src/store/auth-store';
@@ -420,7 +420,7 @@ export default function HomeScreen() {
         month: 'short',
         year: 'numeric',
       }) : '',
-      comingSoon: isComingSoonDeadline(item.deadline),
+      comingSoon: getDeadlineStatus(item.deadline) === 'Active' && isComingSoonDeadline(item.deadline),
       tag: item.type || '',
     }));
   }, [dashboardData?.scholarships]);

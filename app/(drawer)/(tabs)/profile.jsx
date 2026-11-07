@@ -212,9 +212,11 @@ export default function ProfileScreen() {
           {testHistory.map((item) => (<AnimatedPressable key={item.id} className={`flex-row items-center justify-between rounded-[18px] px-4 py-3 ${preferences.darkMode ? 'bg-[#111111]' : 'bg-surface'}`} onPress={() => router.push('/(drawer)/(tabs)/assessment')}>
               <View className="flex-1 pr-3">
                 <Text className={`text-[13px] font-extrabold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{item.quizName || item.title}</Text>
-                <Text className={`mt-1 text-[11px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>
-                  {[item.score ? `Score: ${item.score}` : "", item.attemptedAt ? `Attempted: ${item.attemptedAt}` : item.subtitle].filter(Boolean).join(' • ')}
-                </Text>
+                {[item.score ? `Score: ${item.score}` : "", item.attemptedAt ? `Attempted: ${item.attemptedAt}` : ""].some(Boolean) ? (
+                  <Text className={`mt-1 text-[11px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>
+                    {[item.score ? `Score: ${item.score}` : "", item.attemptedAt ? `Attempted: ${item.attemptedAt}` : ""].filter(Boolean).join(' • ')}
+                  </Text>
+                ) : null}
               </View>
               <Pill label={item.status} tone={item.status === 'Completed' ? palette.green : palette.secondary}/>
             </AnimatedPressable>))}
@@ -226,9 +228,11 @@ export default function ProfileScreen() {
             <View key={booking.id} className={`flex-row items-center justify-between rounded-[18px] px-4 py-3 ${preferences.darkMode ? 'bg-[#111111]' : 'bg-surface'}`}>
               <View>
                 <Text className={`text-[13px] font-extrabold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{booking.mentorName}</Text>
-                <Text className={`text-[11px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{booking.timeSlot || booking.time} | {booking.mentorFee ? `Fee: Rs ${booking.mentorFee}` : booking.date}</Text>
+                <Text className={`text-[11px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{booking.timeSlot || booking.time}{booking.mentorFee ? ` | Fee: Rs ${booking.mentorFee}` : ''}</Text>
               </View>
-              <Pill label={booking.status} tone={palette.green}/>
+              <View className="items-end">
+                <Text className={`text-right text-[11px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{booking.date}</Text>
+              </View>
             </View>
             </AnimatedPressable>))}
         </View>);
@@ -241,7 +245,7 @@ export default function ProfileScreen() {
                 <Text className="text-[13px] font-extrabold text-brand">{record.amount !== "" && record.amount != null ? `Rs ${record.amount}` : record.price}</Text>
               </View>
               <Text className={`text-[11px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Validity: {record.validity || record.expiryDate}</Text>
-              <Text className={`text-[11px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Status: {record.status || 'Active'}</Text>
+              <Text className={`self-start rounded-full px-3 py-1 text-[11px] font-bold ${String(record.status || '').toLowerCase() === 'active' ? 'bg-[#e9f8ed] text-[#238344]' : 'bg-gray-200 text-gray-600'}`}>{record.status || 'Inactive'}</Text>
             </AnimatedPressable>))}
         </View>);
         }

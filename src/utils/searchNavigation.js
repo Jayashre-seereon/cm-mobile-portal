@@ -78,6 +78,10 @@ export function resolveSearchTarget(item) {
     return { url: rawUrl };
   }
 
+  if (type === 'module' && rawUrl.startsWith('/(drawer)')) {
+    return { pathname: rawUrl, params: {} };
+  }
+
   // 1. Careers (stream / category / subfield / specialization) and career paths -> Career Archive
   if (group === 'careers' || group === 'careerpaths' || CAREER_TYPES.includes(type)) {
     const params = { searchType: type || 'category', searchId: id, searchTitle: title };
@@ -105,12 +109,12 @@ export function resolveSearchTarget(item) {
 
   // 2. Institutions / colleges
   if (group === 'institutions' || group === 'colleges' || ['institution', 'institute', 'college'].includes(type)) {
-    return { pathname: ROUTES.institute, params: compactParams({ instituteId: id, title }) };
+    return { pathname: ROUTES.institute, params: {} };
   }
 
   // 3. Entrance exams
   if (group === 'entranceexams' || group === 'exams' || ['entranceexam', 'exam'].includes(type)) {
-    return { pathname: ROUTES.entranceExam, params: compactParams({ examId: id, search: title }) };
+    return { pathname: ROUTES.entranceExam, params: {} };
   }
 
   // 4. Mentors
@@ -120,7 +124,7 @@ export function resolveSearchTarget(item) {
 
   // 5. Scholarships
   if (group === 'scholarships' || type === 'scholarship') {
-    return { pathname: ROUTES.scholarship, params: compactParams({ scholarshipId: id, search: title }) };
+    return { pathname: ROUTES.scholarship, params: {} };
   }
 
   // 6. Study abroad
@@ -130,7 +134,7 @@ export function resolveSearchTarget(item) {
 
   // 7. Masterclasses -> Career & Personality Videos
   if (group === 'masterclasses' || group === 'videos' || ['masterclass', 'video'].includes(type)) {
-    return { pathname: ROUTES.learn, params: compactParams({ videoId: id, search: title }) };
+    return { pathname: ROUTES.learn, params: {} };
   }
 
   // 8. Quizzes
@@ -234,7 +238,7 @@ export async function openTarget(target, { onLocked } = {}) {
     if (!response?.allowed) {
       onLocked?.({
         title: `Unlock ${gate.title}`,
-        message: response?.message || 'Please purchase a subscription to continue accessing this module.',
+        message: `This module is locked. Please purchase a subscription to continue accessing this module. ${gate.title}`,
         returnTarget: { pathname, params: { moduleId: String(moduleId) } },
       });
       return 'locked';

@@ -4,7 +4,7 @@ import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, Pressa
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { globalSearch } from './api/searchApi';
 import { useAppState } from './app-state';
-import { palette } from './careermap-data';
+import { moduleCards, palette } from './careermap-data';
 import { UnlockBottomSheet } from './careermap-ui';
 import { openSubscriptionPrompt } from './subscription-flow';
 import { openTarget, resolveSearchTarget } from './utils/searchNavigation';
@@ -12,6 +12,7 @@ import { openTarget, resolveSearchTarget } from './utils/searchNavigation';
 // Same groups, labels and badges as the web portal's GlobalSearchBar.
 const CATEGORY_TABS = [
     { key: 'all', label: 'All' },
+    { key: 'modules', label: 'Modules', groupKeys: ['modules'], types: ['module'] },
     { key: 'careers', label: 'Careers', groupKeys: ['careers', 'careerPaths'], types: ['stream', 'category', 'secondcategory', 'subcategory', 'careerpath'] },
     { key: 'institutions', label: 'Colleges', groupKeys: ['institutions'], types: ['institution', 'college'] },
     { key: 'entranceExams', label: 'Exams', groupKeys: ['entranceExams'], types: ['entranceexam', 'exam'] },
@@ -24,6 +25,7 @@ const CATEGORY_TABS = [
 ];
 
 const RESULT_GROUPS = [
+    { key: 'modules', label: 'Modules' },
     { key: 'careers', label: 'Careers' },
     { key: 'careerPaths', label: 'Career Paths' },
     { key: 'institutions', label: 'Colleges' },
@@ -36,19 +38,15 @@ const RESULT_GROUPS = [
     { key: 'newsletters', label: 'Career Insights' },
 ];
 
-const POPULAR_SHORTCUTS = [
-    { label: 'Engineering Careers', query: 'Engineering' },
-    { label: 'Top Colleges', query: 'Institute' },
-    { label: 'Entrance Exams', query: 'Exam' },
-    { label: '1-on-1 Mentorship', query: 'Mentor' },
-    { label: 'Scholarships', query: 'Scholarship' },
-];
-
 const EMPTY_DATA = { total: 0, results: [], grouped: {} };
 
 function getTypeConfig(item = {}) {
     const type = String(item.type || '').toLowerCase();
     const group = String(item.group || '').toLowerCase();
+
+    if (type === 'module' || group === 'modules') {
+        return { label: 'Module', color: palette.primary };
+    }
 
     if (['stream', 'category', 'secondcategory', 'subcategory', 'careerpath'].includes(type) || group === 'careers' || group === 'careerpaths') {
         return { label: item.badge || (type === 'secondcategory' ? 'Subfield' : type === 'stream' ? 'Stream' : type === 'careerpath' ? 'Path' : 'Career'), color: palette.purple };
@@ -149,11 +147,25 @@ export function GlobalSearch({ visible, onClose }) {
                     setData(EMPTY_DATA);
                     setError(response?.message || 'Search is unavailable right now.');
                 } else {
-                    const results = Array.isArray(response.results) ? response.results : [];
+                    const entityResults = Array.isArray(response.results) ? response.results : [];
+                    const normalizedQuery = trimmed.toLowerCase().replace(/\s+/g, ' ');
+                    const moduleResults = moduleCards
+                        .filter((module) => module.title.toLowerCase().includes(normalizedQuery))
+                        .map((module) => ({
+                            id: `module:${module.route}`,
+                            title: module.title,
+                            subtitle: module.subtitle,
+                            type: 'module',
+                            group: 'modules',
+                            badge: 'Module',
+                            navigation: { path: module.route },
+                        }));
+                    const results = [...moduleResults, ...entityResults];
+                    const grouped = { ...(response.grouped || {}), modules: moduleResults };
                     setData({
-                        total: typeof response.total === 'number' ? response.total : results.length,
+                        total: (typeof response.total === 'number' ? response.total : entityResults.length) + moduleResults.length,
                         results,
-                        grouped: response.grouped || {},
+                        grouped,
                     });
                 }
             }
@@ -299,19 +311,6 @@ export function GlobalSearch({ visible, onClose }) {
             </View>) : null}
 
           <ScrollView className="flex-1" keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" contentContainerClassName="gap-3 px-5 pb-10" showsVerticalScrollIndicator={false}>
-            {!hasQuery ? (<View className="gap-2">
-                <Text className={`text-[11px] font-extrabold uppercase tracking-[0.8px] ${muted}`}>Popular Categories & Quick Links</Text>
-                {POPULAR_SHORTCUTS.map((shortcut) => (<Pressable key={shortcut.label} onPress={() => setQuery(shortcut.query)} className={`flex-row items-center gap-3 rounded-[16px] border p-3 ${dark ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`}>
-                    <View className="h-8 w-8 items-center justify-center rounded-[10px] bg-brand">
-                      <Ionicons name="search" size={14} color="#ffffff"/>
-                    </View>
-                    <View className="flex-1">
-                      <Text className={`text-[13px] font-bold ${strong}`}>{shortcut.label}</Text>
-                      <Text className={`text-[11px] ${muted}`}>Search “{shortcut.query}”</Text>
-                    </View>
-                  </Pressable>))}
-              </View>) : null}
-
             {hasQuery && isLoading && resultCount === 0 && !error ? (<View className="items-center justify-center gap-3 py-10">
                 <ActivityIndicator size="large" color={palette.primary}/>
                 <Text className={`text-[13px] font-semibold ${muted}`}>Searching the career universe...</Text>
@@ -353,3 +352,4 @@ export function GlobalSearch({ visible, onClose }) {
         }}/>) : null}
     </Modal>);
 }
+

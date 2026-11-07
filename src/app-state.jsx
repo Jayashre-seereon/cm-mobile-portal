@@ -45,15 +45,8 @@ const initialPreferences = {
     },
 };
 const initialSavedCareers = ['Software Engineering', 'UX Design', 'Psychology', 'Digital Marketing'];
-const initialTestHistory = [
-    { id: '1', title: 'Personality Snapshot', subtitle: 'Completed on 08 Apr 2026', status: 'Completed' },
-    { id: '2', title: 'Career Aptitude Test', subtitle: 'Scheduled for 13 Apr 2026', status: 'Upcoming' },
-    { id: '3', title: 'Psychometric Summary', subtitle: 'Available in reports', status: 'Available' },
-];
-const initialBookings = [
-    { id: '1', mentorName: 'Dr. Priya Sharma', date: '12 Apr 2026', time: '4:00 PM', status: 'Confirmed' },
-    { id: '2', mentorName: 'Prof. Rahul Verma', date: '15 Apr 2026', time: '6:30 PM', status: 'Upcoming' },
-];
+const initialTestHistory = [];
+const initialBookings = [];
 const initialFreeAccessUsage = {
     'career-library': null,
     'master-class': null,
@@ -407,7 +400,7 @@ export function AppStateProvider({ children }) {
                     setUserProfile((current) => ({ ...current, ...dashboardUser }));
                 }
 
-                setTestHistory(testItems.length > 0 ? normalizeTestHistoryItems(testItems) : initialTestHistory);
+                setTestHistory(normalizeTestHistoryItems(testItems));
                 setBookings(bookingItems.length > 0 ? normalizeBookingItems(bookingItems) : initialBookings);
 
                 const activeSubscriptions = userSubscriptionItems.filter((item) => String(item?.status || '').toLowerCase() === 'active');
@@ -428,7 +421,7 @@ export function AppStateProvider({ children }) {
             }
             catch {
                 if (isMounted) {
-                    setTestHistory(initialTestHistory);
+                    setTestHistory([]);
                     setBookings(initialBookings);
                     setActivePlanIdState(null);
                     setActiveSubscriptionPlanIds([]);
