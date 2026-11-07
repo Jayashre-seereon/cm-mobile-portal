@@ -54,13 +54,79 @@ function normalizeInstituteItems(value) {
         };
     });
 }
-function isOdishaState(value) {
-    return ['odisha', 'orissa'].includes(String(value || '').trim().toLowerCase());
-}
+const INDIA_STATE_OPTIONS = [
+    'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat',
+    'Haryana', 'Himachal Pradesh', 'Jharkhand', 'Karnataka', 'Kerala', 'Madhya Pradesh',
+    'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Punjab',
+    'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh',
+    'Uttarakhand', 'West Bengal', 'Delhi', 'Jammu and Kashmir', 'Ladakh', 'Chandigarh',
+    'Puducherry', 'Andaman and Nicobar Islands', 'Dadra and Nagar Haveli and Daman and Diu', 'Lakshadweep',
+];
+const normalizeLocationFilter = (value) => String(value || '').trim().toLowerCase();
 
-function InstituteResultsSection({ title, items, loading, error, page, totalPages, onPageChange, onRetry, emptyText }) {
+function InstituteResultsSection({ title, scope, region, emptyText }) {
     const { preferences } = useAppState();
     const darkMode = preferences.darkMode;
+    const [filter, setFilter] = useState('all');
+    const [country, setCountry] = useState('India');
+    const [state, setState] = useState('');
+    const [showStateOptions, setShowStateOptions] = useState(false);
+    const [institutes, setInstitutes] = useState([]);
+    const [pagination, setPagination] = useState(null);
+    const [page, setPage] = useState(1);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
+    const [retryToken, setRetryToken] = useState(0);
+    const requestIdRef = useRef(0);
+    const pageSize = 12;
+
+    const otherCountryStates = useMemo(() => Array.from(new Set(
+        institutes
+            .filter((item) => normalizeLocationFilter(item.country) !== 'india')
+            .map((item) => item.state)
+            .filter(Boolean)
+    )), [institutes]);
+
+    useEffect(() => {
+        let active = true;
+        const requestId = ++requestIdRef.current;
+        setLoading(true);
+        setError('');
+        getCareerLibraryInstitutions({
+            ...scope,
+            page,
+            limit: pageSize,
+            region,
+            state,
+            type: filter === 'govt' ? 'Govt' : filter === 'private' ? 'Pvt' : '',
+        })
+            .then((result) => {
+                if (!active || requestId !== requestIdRef.current) return;
+                setInstitutes(normalizeInstituteItems(result?.items));
+                setPagination(result?.pagination || null);
+            })
+            .catch((fetchError) => {
+                if (!active || requestId !== requestIdRef.current) return;
+                setInstitutes([]);
+                setPagination(null);
+                setError(fetchError?.response?.data?.message || 'Unable to load institutes.');
+            })
+            .finally(() => {
+                if (active && requestId === requestIdRef.current) setLoading(false);
+            });
+        return () => { active = false; };
+    }, [scope.categoryId, scope.secondcategoryId, scope.subcategoryId, region, state, filter, country, page, retryToken]);
+
+    const totalItems = Number(pagination?.total ?? pagination?.totalCount ?? 0);
+    const totalPages = Math.max(1, Number(pagination?.totalPages || Math.ceil(totalItems / pageSize) || 1));
+    const filtered = institutes.filter((item) => {
+        if (country === 'India') return normalizeLocationFilter(item.country) === 'india';
+        return normalizeLocationFilter(item.country) !== 'india';
+    });
+    const stateOptions = country === 'India' ? INDIA_STATE_OPTIONS : otherCountryStates;
+    const controlClass = `flex-row items-center justify-between rounded-[12px] border px-3 py-2.5 ${darkMode ? 'border-[#302a30] bg-[#080808]' : 'border-[#d7c3bc] bg-white'}`;
+    const controlTextClass = `text-[12px] font-semibold ${darkMode ? 'text-white' : 'text-ink'}`;
+
     return (
         <View className={`mb-4 rounded-[20px] border p-4 ${darkMode ? 'border-[#1a1a1a] bg-[#111111]' : 'border-line bg-card'}`}>
             <View className="mb-3 flex-row items-center gap-2">
@@ -68,7 +134,41 @@ function InstituteResultsSection({ title, items, loading, error, page, totalPage
                 <Text className={`flex-1 text-[14px] font-bold ${darkMode ? 'text-white' : 'text-ink'}`}>{title}</Text>
                 {loading ? <Text className="text-[11px] font-semibold" style={{ color: palette.primary }}>Loading…</Text> : null}
             </View>
-            {items.map((institution, index) => (
+            <View className="mb-3 gap-2">
+                <View className="flex-row gap-2">
+                    <Pressable onPress={() => { setCountry((current) => current === 'India' ? 'Other' : 'India'); setState(''); setPage(1); }} className={`${controlClass} flex-1`}>
+                        <Text className={controlTextClass}>{country}</Text><Ionicons name="chevron-down" size={15} color={darkMode ? '#ffffff' : palette.text}/>
+                    </Pressable>
+                    <Pressable onPress={() => setShowStateOptions((value) => !value)} className={`${controlClass} flex-[2]`}>
+                        <Text numberOfLines={1} className={`flex-1 ${controlTextClass}`}>{state || 'All States'}</Text><Ionicons name="chevron-down" size={15} color={darkMode ? '#ffffff' : palette.text}/>
+                    </Pressable>
+                </View>
+                {showStateOptions ? (
+                    <View className={`max-h-[220px] rounded-[12px] border ${darkMode ? 'border-[#302a30] bg-[#080808]' : 'border-[#d7c3bc] bg-white'}`}>
+                        <ScrollView nestedScrollEnabled keyboardShouldPersistTaps="handled">
+                            <Pressable onPress={() => { setState(''); setPage(1); setShowStateOptions(false); }} className="border-b px-3 py-2.5" style={{ borderColor: darkMode ? '#302a30' : '#eee2dd' }}>
+                                <Text className={`text-[12px] font-semibold ${!state ? 'text-brand' : darkMode ? 'text-white' : 'text-ink'}`}>All States</Text>
+                            </Pressable>
+                            {stateOptions.map((option) => (
+                                <Pressable key={option} onPress={() => { setState(option); setPage(1); setShowStateOptions(false); }} className="border-b px-3 py-2.5" style={{ borderColor: darkMode ? '#302a30' : '#eee2dd' }}>
+                                    <Text className={`text-[12px] font-semibold ${normalizeLocationFilter(state) === normalizeLocationFilter(option) ? 'text-brand' : darkMode ? 'text-white' : 'text-ink'}`}>{option}</Text>
+                                </Pressable>
+                            ))}
+                        </ScrollView>
+                    </View>
+                ) : null}
+                <View className="flex-row flex-wrap gap-2">
+                    {[
+                        { key: 'all', label: 'All' },
+                        { key: 'govt', label: 'Government' },
+                        { key: 'private', label: 'Private' },
+                    ].map((option) => {
+                        const active = filter === option.key;
+                        return <Pressable key={option.key} onPress={() => { setFilter(option.key); setPage(1); }} className={`rounded-full px-3 py-2 ${active ? 'bg-brand' : darkMode ? 'bg-[#1a1a1a]' : 'bg-[#f2ebe6]'}`} style={active ? { backgroundColor: palette.primary } : undefined}><Text className={`text-[11px] font-bold ${active ? 'text-white' : darkMode ? 'text-white' : 'text-ink'}`}>{option.label}</Text></Pressable>;
+                    })}
+                </View>
+            </View>
+            {filtered.map((institution, index) => (
                 <View key={`${institution.id}-${index}`} className={`mb-3 flex-row items-center gap-3 rounded-[14px] border px-3 py-3 ${darkMode ? 'border-[#292329] bg-[#0b0b0b]' : 'border-[#f0e4e2] bg-white'}`}>
                     <View className="h-[48px] w-[48px] overflow-hidden rounded-[12px]" style={{ backgroundColor: `${palette.primary}12` }}>
                         {institution.logo ? <Image source={{ uri: institution.logo }} style={{ width: '100%', height: '100%' }} resizeMode="cover"/> : <View className="flex-1 items-center justify-center"><Ionicons name="business-outline" size={20} color={palette.primary}/></View>}
@@ -83,24 +183,24 @@ function InstituteResultsSection({ title, items, loading, error, page, totalPage
                     {institution.url ? <Pressable onPress={() => Linking.openURL(institution.url)} className="h-9 w-9 items-center justify-center rounded-full" style={{ borderWidth: 1, borderColor: darkMode ? '#3a3037' : '#f0e4e2' }}><Ionicons name="arrow-forward" size={16} color={palette.primary}/></Pressable> : null}
                 </View>
             ))}
-            {!loading && !items.length && !error ? <Text className={`py-2 text-[13px] ${darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{emptyText}</Text> : null}
+            {!loading && !filtered.length && !error ? <Text className={`py-2 text-[13px] ${darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{emptyText}</Text> : null}
             {error ? (
                 <View className="flex-row items-center justify-between gap-3 py-2">
                     <Text className="flex-1 text-[12px] text-red-500">{error}</Text>
-                    <Pressable onPress={onRetry} className="rounded-full px-3 py-2" style={{ backgroundColor: `${palette.primary}12` }}><Text className="text-[12px] font-bold" style={{ color: palette.primary }}>Retry</Text></Pressable>
+                    <Pressable onPress={() => setRetryToken((value) => value + 1)} className="rounded-full px-3 py-2" style={{ backgroundColor: `${palette.primary}12` }}><Text className="text-[12px] font-bold" style={{ color: palette.primary }}>Retry</Text></Pressable>
                 </View>
             ) : null}
             {totalPages > 1 ? (
                 <View className="mt-2 flex-row flex-wrap items-center justify-center gap-2">
-                    <Pressable disabled={loading || page <= 1} onPress={() => onPageChange(page - 1)} className={`rounded-full border px-3 py-2 ${darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`}>
+                    <Pressable disabled={loading || page <= 1} onPress={() => setPage((value) => Math.max(1, value - 1))} className={`rounded-full border px-3 py-2 ${darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`}>
                         <Text className={`text-[11px] font-bold ${loading || page <= 1 ? 'opacity-40' : ''}`} style={{ color: palette.primary }}>Previous</Text>
                     </Pressable>
                     {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => (
-                        <Pressable key={pageNumber} disabled={loading} onPress={() => onPageChange(pageNumber)} className={`h-8 min-w-8 items-center justify-center rounded-full border px-2 ${pageNumber === page ? 'bg-brand' : darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`} style={pageNumber === page ? { backgroundColor: palette.primary, borderColor: palette.primary } : undefined}>
+                        <Pressable key={pageNumber} disabled={loading} onPress={() => setPage(pageNumber)} className={`h-8 min-w-8 items-center justify-center rounded-full border px-2 ${pageNumber === page ? 'bg-brand' : darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`} style={pageNumber === page ? { backgroundColor: palette.primary, borderColor: palette.primary } : undefined}>
                             <Text className={`text-[11px] font-bold ${pageNumber === page ? 'text-white' : ''}`} style={pageNumber === page ? undefined : { color: palette.primary }}>{pageNumber}</Text>
                         </Pressable>
                     ))}
-                    <Pressable disabled={loading || page >= totalPages} onPress={() => onPageChange(page + 1)} className={`rounded-full border px-3 py-2 ${darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`}>
+                    <Pressable disabled={loading || page >= totalPages} onPress={() => setPage((value) => Math.min(totalPages, value + 1))} className={`rounded-full border px-3 py-2 ${darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`}>
                         <Text className={`text-[11px] font-bold ${loading || page >= totalPages ? 'opacity-40' : ''}`} style={{ color: palette.primary }}>Next</Text>
                     </Pressable>
                 </View>
@@ -349,17 +449,6 @@ export default function CareerLibraryScreen() {
     const [selectedSecondCategory, setSelectedSecondCategory] = useState(null);
     const [selectedSubCategory, setSelectedSubCategory] = useState(null);
     const [selectedDetailSource, setSelectedDetailSource] = useState(null);
-    const [odishaInstitutes, setOdishaInstitutes] = useState([]);
-    const [outsideInstitutes, setOutsideInstitutes] = useState([]);
-    const [odishaPage, setOdishaPage] = useState(1);
-    const [outsidePage, setOutsidePage] = useState(1);
-    const [odishaTotalPages, setOdishaTotalPages] = useState(1);
-    const [outsideTotalPages, setOutsideTotalPages] = useState(1);
-    const [odishaLoading, setOdishaLoading] = useState(false);
-    const [outsideLoading, setOutsideLoading] = useState(false);
-    const [odishaError, setOdishaError] = useState('');
-    const [outsideError, setOutsideError] = useState('');
-    const instituteRequestRefs = useRef({ odisha: 0, outside: 0 });
     const [detailReturnLevel, setDetailReturnLevel] = useState('subcategory');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -382,99 +471,6 @@ export default function CareerLibraryScreen() {
         secondcategoryId: selectedSecondCategory?.id || selectedSubCategory?.secondcategoryId || selectedDetailSource?.secondcategoryId || '',
         subcategoryId: selectedSubCategory?.id || selectedDetailSource?.subcategoryId || '',
     }), [selectedCategory?.id, selectedSecondCategory?.id, selectedSecondCategory?.categoryId, selectedSubCategory?.id, selectedSubCategory?.categoryId, selectedSubCategory?.secondcategoryId, selectedDetailSource?.categoryId, selectedDetailSource?.secondcategoryId, selectedDetailSource?.subcategoryId]);
-
-    const getInstituteTotalPages = (result, fallbackCount = 0) => {
-        const apiPages = Number(result?.pagination?.totalPages);
-        if (Number.isFinite(apiPages) && apiPages > 0) return apiPages;
-        const total = Number(result?.pagination?.total);
-        if (Number.isFinite(total) && total > 0) return Math.ceil(total / 10);
-        return Math.max(1, Math.ceil(fallbackCount / 10));
-    };
-
-    useEffect(() => {
-        if (currentLevel !== 'details') return undefined;
-        let active = true;
-        const odishaRequestId = ++instituteRequestRefs.current.odisha;
-        const outsideRequestId = ++instituteRequestRefs.current.outside;
-        setOdishaInstitutes([]);
-        setOutsideInstitutes([]);
-        setOdishaPage(1);
-        setOutsidePage(1);
-        setOdishaTotalPages(1);
-        setOutsideTotalPages(1);
-        setOdishaError('');
-        setOutsideError('');
-        setOdishaLoading(true);
-        setOutsideLoading(true);
-
-        getCareerLibraryInstitutions({ ...instituteScope, page: 1, limit: 10, state: 'Odisha' })
-            .then((result) => {
-                if (!active || odishaRequestId !== instituteRequestRefs.current.odisha) return;
-                const items = normalizeInstituteItems(result?.items).filter((item) => isOdishaState(item.state));
-                setOdishaInstitutes(items);
-                setOdishaTotalPages(getInstituteTotalPages(result, items.length));
-            })
-            .catch(() => {
-                if (active && odishaRequestId === instituteRequestRefs.current.odisha) setOdishaError('Unable to load Odisha institutes right now.');
-            })
-            .finally(() => {
-                if (active && odishaRequestId === instituteRequestRefs.current.odisha) setOdishaLoading(false);
-            });
-
-        getCareerLibraryInstitutions({ ...instituteScope, page: 1, limit: 10 })
-            .then((result) => {
-                if (!active || outsideRequestId !== instituteRequestRefs.current.outside) return;
-                const items = normalizeInstituteItems(result?.items).filter((item) => !isOdishaState(item.state));
-                setOutsideInstitutes(items);
-                setOutsideTotalPages(getInstituteTotalPages(result, items.length));
-            })
-            .catch(() => {
-                if (active && outsideRequestId === instituteRequestRefs.current.outside) setOutsideError('Unable to load institutes outside Odisha right now.');
-            })
-            .finally(() => {
-                if (active && outsideRequestId === instituteRequestRefs.current.outside) setOutsideLoading(false);
-            });
-
-        return () => { active = false; };
-    }, [currentLevel, instituteScope]);
-
-    const changeOdishaPage = async (nextPage) => {
-        if (odishaLoading || nextPage < 1 || nextPage > odishaTotalPages) return;
-        const requestId = ++instituteRequestRefs.current.odisha;
-        setOdishaLoading(true);
-        setOdishaError('');
-        try {
-            const result = await getCareerLibraryInstitutions({ ...instituteScope, page: nextPage, limit: 10, state: 'Odisha' });
-            if (requestId !== instituteRequestRefs.current.odisha) return;
-            const items = normalizeInstituteItems(result?.items).filter((item) => isOdishaState(item.state));
-            setOdishaInstitutes(items);
-            setOdishaPage(nextPage);
-            setOdishaTotalPages(getInstituteTotalPages(result, items.length));
-        } catch {
-            if (requestId === instituteRequestRefs.current.odisha) setOdishaError('Unable to load Odisha institutes for this page. Please try again.');
-        } finally {
-            if (requestId === instituteRequestRefs.current.odisha) setOdishaLoading(false);
-        }
-    };
-
-    const changeOutsidePage = async (nextPage) => {
-        if (outsideLoading || nextPage < 1 || nextPage > outsideTotalPages) return;
-        const requestId = ++instituteRequestRefs.current.outside;
-        setOutsideLoading(true);
-        setOutsideError('');
-        try {
-            const result = await getCareerLibraryInstitutions({ ...instituteScope, page: nextPage, limit: 10 });
-            if (requestId !== instituteRequestRefs.current.outside) return;
-            const items = normalizeInstituteItems(result?.items).filter((item) => !isOdishaState(item.state));
-            setOutsideInstitutes(items);
-            setOutsidePage(nextPage);
-            setOutsideTotalPages(getInstituteTotalPages(result, items.length));
-        } catch {
-            if (requestId === instituteRequestRefs.current.outside) setOutsideError('Unable to load institutes outside Odisha for this page. Please try again.');
-        } finally {
-            if (requestId === instituteRequestRefs.current.outside) setOutsideLoading(false);
-        }
-    };
 
     const resetToStreams = () => {
         setShowUnlockSheet(false);
@@ -1245,24 +1241,14 @@ export default function CareerLibraryScreen() {
 ) : null}
 <InstituteResultsSection
   title="Institutes in Odisha"
-  items={odishaInstitutes}
-  loading={odishaLoading}
-  error={odishaError}
-  page={odishaPage}
-  totalPages={odishaTotalPages}
-  onPageChange={changeOdishaPage}
-  onRetry={() => changeOdishaPage(odishaPage)}
+  scope={instituteScope}
+  region="inside"
   emptyText="No Odisha institutes found for this selection."
 />
 <InstituteResultsSection
   title="Institutes outside Odisha"
-  items={outsideInstitutes}
-  loading={outsideLoading}
-  error={outsideError}
-  page={outsidePage}
-  totalPages={outsideTotalPages}
-  onPageChange={changeOutsidePage}
-  onRetry={() => changeOutsidePage(outsidePage)}
+  scope={instituteScope}
+  region="outside"
   emptyText="No institutes found outside Odisha."
 />
         

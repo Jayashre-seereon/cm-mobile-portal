@@ -96,17 +96,21 @@ export async function getInstitutes({
 
 export async function getCareerLibraryInstitutions({
   page = 1,
-  limit = 10,
+  limit = 12,
   categoryId = '',
   secondcategoryId = '',
   subcategoryId = '',
+  region = '',
   state = '',
+  type = '',
 } = {}) {
   const params = new URLSearchParams({ page: String(page), limit: String(limit) });
   if (categoryId) params.append('categoryId', String(categoryId));
   if (secondcategoryId) params.append('secondcategoryId', String(secondcategoryId));
   if (subcategoryId) params.append('subcategoryId', String(subcategoryId));
+  if (region) params.append('region', region);
   if (state) params.append('state', state);
+  if (type) params.append('type', type);
 
   const response = await api.get(`/careerlibrary/institutions?${params.toString()}`);
   const data = response?.data?.data;
