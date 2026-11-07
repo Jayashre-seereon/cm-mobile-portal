@@ -1239,18 +1239,20 @@ export default function CareerLibraryScreen() {
     </View>
   </View>
 ) : null}
-<InstituteResultsSection
-  title="Institutes in Odisha"
-  scope={instituteScope}
-  region="inside"
-  emptyText="No Odisha institutes found for this selection."
-/>
+
 <InstituteResultsSection
   title="Institutes outside Odisha"
   scope={instituteScope}
   region="outside"
   emptyText="No institutes found outside Odisha."
 />
+<InstituteResultsSection
+  title="Institutes in Odisha"
+  scope={instituteScope}
+  region="inside"
+  emptyText="No Odisha institutes found for this selection."
+/>
+
         
             
           </View>
