@@ -64,7 +64,7 @@ const INDIA_STATE_OPTIONS = [
 ];
 const normalizeLocationFilter = (value) => String(value || '').trim().toLowerCase();
 
-function InstituteResultsSection({ title, scope, region, emptyText }) {
+function InstituteResultsSection({ title, scope, region, emptyText, showLocationFilters = true }) {
     const { preferences } = useAppState();
     const darkMode = preferences.darkMode;
     const [filter, setFilter] = useState('all');
@@ -120,6 +120,7 @@ function InstituteResultsSection({ title, scope, region, emptyText }) {
     const totalItems = Number(pagination?.total ?? pagination?.totalCount ?? 0);
     const totalPages = Math.max(1, Number(pagination?.totalPages || Math.ceil(totalItems / pageSize) || 1));
     const filtered = institutes.filter((item) => {
+        if (!showLocationFilters) return true;
         if (country === 'India') return normalizeLocationFilter(item.country) === 'india';
         return normalizeLocationFilter(item.country) !== 'india';
     });
@@ -134,7 +135,7 @@ function InstituteResultsSection({ title, scope, region, emptyText }) {
                 <Text className={`flex-1 text-[14px] font-bold ${darkMode ? 'text-white' : 'text-ink'}`}>{title}</Text>
                 {loading ? <Text className="text-[11px] font-semibold" style={{ color: palette.primary }}>Loading…</Text> : null}
             </View>
-            <View className="mb-3 gap-2">
+            {showLocationFilters ? <View className="mb-3 gap-2">
                 <View className="flex-row gap-2">
                     <Pressable onPress={() => { setCountry((current) => current === 'India' ? 'Other' : 'India'); setState(''); setPage(1); }} className={`${controlClass} flex-1`}>
                         <Text className={controlTextClass}>{country}</Text><Ionicons name="chevron-down" size={15} color={darkMode ? '#ffffff' : palette.text}/>
@@ -167,7 +168,18 @@ function InstituteResultsSection({ title, scope, region, emptyText }) {
                         return <Pressable key={option.key} onPress={() => { setFilter(option.key); setPage(1); }} className={`rounded-full px-3 py-2 ${active ? 'bg-brand' : darkMode ? 'bg-[#1a1a1a]' : 'bg-[#f2ebe6]'}`} style={active ? { backgroundColor: palette.primary } : undefined}><Text className={`text-[11px] font-bold ${active ? 'text-white' : darkMode ? 'text-white' : 'text-ink'}`}>{option.label}</Text></Pressable>;
                     })}
                 </View>
-            </View>
+            </View> : (
+                <View className="mb-3 flex-row flex-wrap gap-2">
+                    {[
+                        { key: 'all', label: 'All' },
+                        { key: 'govt', label: 'Government' },
+                        { key: 'private', label: 'Private' },
+                    ].map((option) => {
+                        const active = filter === option.key;
+                        return <Pressable key={option.key} onPress={() => { setFilter(option.key); setPage(1); }} className={`rounded-full px-3 py-2 ${active ? 'bg-brand' : darkMode ? 'bg-[#1a1a1a]' : 'bg-[#f2ebe6]'}`} style={active ? { backgroundColor: palette.primary } : undefined}><Text className={`text-[11px] font-bold ${active ? 'text-white' : darkMode ? 'text-white' : 'text-ink'}`}>{option.label}</Text></Pressable>;
+                    })}
+                </View>
+            )}
             {filtered.map((institution, index) => (
                 <View key={`${institution.id}-${index}`} className={`mb-3 flex-row items-center gap-3 rounded-[14px] border px-3 py-3 ${darkMode ? 'border-[#292329] bg-[#0b0b0b]' : 'border-[#f0e4e2] bg-white'}`}>
                     <View className="h-[48px] w-[48px] overflow-hidden rounded-[12px]" style={{ backgroundColor: `${palette.primary}12` }}>
@@ -180,7 +192,6 @@ function InstituteResultsSection({ title, scope, region, emptyText }) {
                         </View>
                         <Text className={`mt-1 text-[12px] leading-5 ${darkMode ? 'text-gray-300' : 'text-gray-900'}`}>{institution.location}</Text>
                     </View>
-                    {institution.url ? <Pressable onPress={() => Linking.openURL(institution.url)} className="h-9 w-9 items-center justify-center rounded-full" style={{ borderWidth: 1, borderColor: darkMode ? '#3a3037' : '#f0e4e2' }}><Ionicons name="arrow-forward" size={16} color={palette.primary}/></Pressable> : null}
                 </View>
             ))}
             {!loading && !filtered.length && !error ? <Text className={`py-2 text-[13px] ${darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{emptyText}</Text> : null}
@@ -191,17 +202,13 @@ function InstituteResultsSection({ title, scope, region, emptyText }) {
                 </View>
             ) : null}
             {totalPages > 1 ? (
-                <View className="mt-2 flex-row flex-wrap items-center justify-center gap-2">
-                    <Pressable disabled={loading || page <= 1} onPress={() => setPage((value) => Math.max(1, value - 1))} className={`rounded-full border px-3 py-2 ${darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`}>
-                        <Text className={`text-[11px] font-bold ${loading || page <= 1 ? 'opacity-40' : ''}`} style={{ color: palette.primary }}>Previous</Text>
+                <View className="mt-3 flex-row flex-wrap items-center justify-center gap-2">
+                    <Pressable disabled={loading || page <= 1} onPress={() => setPage((value) => Math.max(1, value - 1))} accessibilityLabel="Previous page" className={`h-9 w-9 items-center justify-center rounded-full border ${darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`}>
+                        <Ionicons name="chevron-back" size={17} color={loading || page <= 1 ? '#aaa' : palette.primary}/>
                     </Pressable>
-                    {Array.from({ length: totalPages }, (_, index) => index + 1).map((pageNumber) => (
-                        <Pressable key={pageNumber} disabled={loading} onPress={() => setPage(pageNumber)} className={`h-8 min-w-8 items-center justify-center rounded-full border px-2 ${pageNumber === page ? 'bg-brand' : darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`} style={pageNumber === page ? { backgroundColor: palette.primary, borderColor: palette.primary } : undefined}>
-                            <Text className={`text-[11px] font-bold ${pageNumber === page ? 'text-white' : ''}`} style={pageNumber === page ? undefined : { color: palette.primary }}>{pageNumber}</Text>
-                        </Pressable>
-                    ))}
-                    <Pressable disabled={loading || page >= totalPages} onPress={() => setPage((value) => Math.min(totalPages, value + 1))} className={`rounded-full border px-3 py-2 ${darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`}>
-                        <Text className={`text-[11px] font-bold ${loading || page >= totalPages ? 'opacity-40' : ''}`} style={{ color: palette.primary }}>Next</Text>
+                    <Text className={`px-1 text-[11px] font-semibold ${darkMode ? 'text-white' : 'text-ink'}`}>Page {page} of {totalPages}</Text>
+                    <Pressable disabled={loading || page >= totalPages} onPress={() => setPage((value) => Math.min(totalPages, value + 1))} accessibilityLabel="Next page" className={`h-9 w-9 items-center justify-center rounded-full border ${darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`}>
+                        <Ionicons name="chevron-forward" size={17} color={loading || page >= totalPages ? '#aaa' : palette.primary}/>
                     </Pressable>
                 </View>
             ) : null}
@@ -1251,6 +1258,7 @@ export default function CareerLibraryScreen() {
   scope={instituteScope}
   region="inside"
   emptyText="No Odisha institutes found for this selection."
+  showLocationFilters={false}
 />
 
         

@@ -22,7 +22,6 @@ export default function LoginScreen() {
   const setRefreshToken = useAuthStore((state) => state.setRefreshToken);
   const setUser = useAuthStore((state) => state.setUser);
   const setProfileIncomplete = useAuthStore((state) => state.setProfileIncomplete);
-  const setPendingInstituteOnboarding = useAuthStore((state) => state.setPendingInstituteOnboarding);
   const markAuthenticatedSession = useAuthStore((state) => state.markAuthenticatedSession);
   const clearAuthFlow = useAuthStore((state) => state.clearAuthFlow);
 
@@ -48,13 +47,12 @@ export default function LoginScreen() {
 
   const completeLogin = (response) => {
     const profileIncomplete = Boolean(response?.profileIncomplete);
-    const requiresInstituteOnboarding = Boolean(response?.user?.isInstituteStudent) && !profileIncomplete;
 
     setAccessToken(response.accessToken || '');
     setRefreshToken(response.refreshToken || '');
     setUser(response.user || null);
     setProfileIncomplete(profileIncomplete);
-    setPendingInstituteOnboarding(requiresInstituteOnboarding);
+    useAuthStore.getState().setPendingInstituteOnboarding(false);
     markAuthenticatedSession();
 
     void createUserHistoryEntry().catch((error) => {
@@ -67,7 +65,7 @@ export default function LoginScreen() {
     }
 
     clearAuthFlow();
-    router.replace(requiresInstituteOnboarding ? '/onboarding' : '/(drawer)/(tabs)');
+    router.replace('/(drawer)/(tabs)');
   };
 
   const handleSendOtp = async () => {
@@ -338,7 +336,7 @@ export default function LoginScreen() {
 
             <AnimatedPressable onPress={() => router.replace(isExistingUser ? '/onboarding' : '/auth-entry')}>
               <Text className="text-[13px] font-bold text-brand">
-                {isExistingUser ? 'New user? Start onboarding' : 'Existing user? Go to login options'}
+                {isExistingUser ? 'New user?' : 'Existing user? Go to login options'}
               </Text>
             </AnimatedPressable>
 

@@ -642,7 +642,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                         onPress={() => setPage((value) => Math.max(value - 1, 1))}
                         className={`rounded-full px-4 py-2 ${!pagination.hasPreviousPage || isLoading ? 'bg-[#e8e1de]' : 'bg-brand'}`}
                     >
-                        <Text className="text-[12px] font-bold text-white">Previous</Text>
+                        <Ionicons name="chevron-back" size={16} color="#ffffff" />
                     </Pressable>
                     <Text className={`text-[12px] font-semibold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>
                         Page {pagination.page} of {pagination.totalPages}
@@ -652,7 +652,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                         onPress={() => setPage((value) => value + 1)}
                         className={`rounded-full px-4 py-2 ${!pagination.hasNextPage || isLoading ? 'bg-[#e8e1de]' : 'bg-brand'}`}
                     >
-                        <Text className="text-[12px] font-bold text-white">Next</Text>
+                        <Ionicons name="chevron-forward" size={16} color="#ffffff" />
                     </Pressable>
                 </View>
             ) : null}

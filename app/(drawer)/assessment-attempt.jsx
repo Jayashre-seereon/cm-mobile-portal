@@ -335,6 +335,7 @@ export default function AssessmentAttemptScreen() {
 
   // Final submission
   async function handleSubmitTest() {
+    if (unansweredQuestions.length > 0) return;
     setIsSubmitModalVisible(false);
     setSubmitting(true);
 
@@ -1337,10 +1338,12 @@ export default function AssessmentAttemptScreen() {
 
         {isLastSection ? (
           <TouchableOpacity
+            disabled={unansweredQuestions.length > 0}
             activeOpacity={0.85}
             onPress={() => setIsSubmitModalVisible(true)}
             style={{
-              backgroundColor: '#10b981',
+              backgroundColor: unansweredQuestions.length > 0 ? '#9ca3af' : '#10b981',
+              opacity: unansweredQuestions.length > 0 ? 0.65 : 1,
               paddingHorizontal: 14,
               paddingVertical: 9,
               borderRadius: 12,
@@ -1485,10 +1488,12 @@ export default function AssessmentAttemptScreen() {
 
                 <View style={{ gap: 8, marginTop: 6 }}>
                  <TouchableOpacity
+  disabled={unansweredQuestions.length > 0}
   onPress={handleSubmitTest}
   activeOpacity={0.85}
   style={{
-    backgroundColor: '#9a2119',
+    backgroundColor: unansweredQuestions.length > 0 ? '#9ca3af' : '#9a2119',
+    opacity: unansweredQuestions.length > 0 ? 0.65 : 1,
     borderRadius: 14,
     paddingVertical: 12,
     alignItems: 'center',
