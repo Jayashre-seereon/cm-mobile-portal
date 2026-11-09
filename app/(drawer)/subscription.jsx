@@ -40,25 +40,25 @@ export default function SubscriptionScreen() {
             label: 'Basic',
             price: '₹1,500',
             note: '',
-            features: [true, false, false, false, false, false, false, false, false],
+            features: [true, false, false, false, false, false, false, false, false, false],
         },
         {
             label: 'Standard',
             price: '₹3,000',
             note: '',
-            features: [true, true, true, true, false, false, false, false, false],
+            features: [true, true, true, true, false, false, false, false, false, false],
         },
         {
             label: 'Most Popular',
             price: '₹5,000',
             note: '',
-            features: [true, true, true, true, true, true, true, false, false],
+            features: [true, true, true, true, true, true, true, true, false, false],
         },
         {
             label: 'Premium',
             price: '₹7,500',
             note: '(₹5,000 + ₹2,500)',
-            features: [true, true, true, true, true, true, true, true, true],
+            features: [true, true, true, true, true, true, true, true, true, true],
         },
     ];
 
@@ -67,6 +67,7 @@ export default function SubscriptionScreen() {
         { label: 'Detailed Psychometric Assessment', notes: [null, null, null, null] },
         { label: 'Personalized Career Recommendations', notes: [null, null, null, null] },
         { label: 'Comprehensive Career Counselling', notes: [null, null, '(Unlimited for 1 Year)', '(Unlimited for 1 Year)'] },
+        { label: 'Infocentre', notes: [null, null, null, null] },
         { label: 'Personalized Career Roadmap', notes: [null, null, null, null] },
         { label: 'End-to-End Career Planning', notes: [null, null, null, null] },
         { label: 'Annual Career Mentorship & Follow-up Support', notes: [null, null, null, null] },
