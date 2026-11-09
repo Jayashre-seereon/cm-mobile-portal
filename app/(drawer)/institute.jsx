@@ -639,14 +639,6 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                 <View className="flex-row items-center justify-center gap-3 py-3">
                     <Pressable
                         disabled={!pagination.hasPreviousPage || isLoading}
-                        onPress={() => setPage(1)}
-                        accessibilityLabel="First page"
-                        className={`rounded-full px-3 py-2 ${!pagination.hasPreviousPage || isLoading ? 'bg-[#e8e1de]' : 'bg-brand'}`}
-                    >
-                        <Text className="text-[11px] font-bold text-white">« First</Text>
-                    </Pressable>
-                    <Pressable
-                        disabled={!pagination.hasPreviousPage || isLoading}
                         onPress={() => setPage((value) => Math.max(value - 1, 1))}
                         className={`rounded-full px-4 py-2 ${!pagination.hasPreviousPage || isLoading ? 'bg-[#e8e1de]' : 'bg-brand'}`}
                     >
@@ -661,14 +653,6 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                         className={`rounded-full px-4 py-2 ${!pagination.hasNextPage || isLoading ? 'bg-[#e8e1de]' : 'bg-brand'}`}
                     >
                         <Ionicons name="chevron-forward" size={16} color="#ffffff" />
-                    </Pressable>
-                    <Pressable
-                        disabled={!pagination.hasNextPage || isLoading}
-                        onPress={() => setPage(pagination.totalPages)}
-                        accessibilityLabel="Last page"
-                        className={`rounded-full px-3 py-2 ${!pagination.hasNextPage || isLoading ? 'bg-[#e8e1de]' : 'bg-brand'}`}
-                    >
-                        <Text className="text-[11px] font-bold text-white">Last »</Text>
                     </Pressable>
                 </View>
             ) : null}

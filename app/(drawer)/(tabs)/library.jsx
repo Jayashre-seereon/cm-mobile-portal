@@ -204,18 +204,12 @@ function InstituteResultsSection({ title, scope, region, emptyText, showLocation
             ) : null}
             {totalPages > 1 ? (
                 <View className="mt-3 flex-row flex-wrap items-center justify-center gap-2">
-                    <Pressable disabled={loading || page <= 1} onPress={() => setPage(1)} accessibilityLabel="First page" className={`rounded-full border px-3 py-2 ${darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`}>
-                        <Text className={`text-[11px] font-bold ${loading || page <= 1 ? 'opacity-40' : ''}`} style={{ color: palette.primary }}>« First</Text>
-                    </Pressable>
                     <Pressable disabled={loading || page <= 1} onPress={() => setPage((value) => Math.max(1, value - 1))} accessibilityLabel="Previous page" className={`h-9 w-9 items-center justify-center rounded-full border ${darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`}>
                         <Ionicons name="chevron-back" size={17} color={loading || page <= 1 ? '#aaa' : palette.primary}/>
                     </Pressable>
                     <Text className={`px-1 text-[11px] font-semibold ${darkMode ? 'text-white' : 'text-ink'}`}>Page {page} of {totalPages}</Text>
                     <Pressable disabled={loading || page >= totalPages} onPress={() => setPage((value) => Math.min(totalPages, value + 1))} accessibilityLabel="Next page" className={`h-9 w-9 items-center justify-center rounded-full border ${darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`}>
                         <Ionicons name="chevron-forward" size={17} color={loading || page >= totalPages ? '#aaa' : palette.primary}/>
-                    </Pressable>
-                    <Pressable disabled={loading || page >= totalPages} onPress={() => setPage(totalPages)} accessibilityLabel="Last page" className={`rounded-full border px-3 py-2 ${darkMode ? 'border-[#3a3037]' : 'border-[#d7c3bc]'}`}>
-                        <Text className={`text-[11px] font-bold ${loading || page >= totalPages ? 'opacity-40' : ''}`} style={{ color: palette.primary }}>Last »</Text>
                     </Pressable>
                 </View>
             ) : null}

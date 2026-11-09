@@ -336,7 +336,7 @@ export default function LoginScreen() {
 
             <AnimatedPressable onPress={() => router.replace(isExistingUser ? '/onboarding' : '/auth-entry')}>
               <Text className="text-[13px] font-bold text-brand">
-                {isExistingUser ? 'New user? Start onboarding' : 'Existing user? Go to login options'}
+                {isExistingUser ? 'New user?' : 'Existing user? Go to login options'}
               </Text>
             </AnimatedPressable>
 
