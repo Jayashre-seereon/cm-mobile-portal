@@ -192,7 +192,6 @@ function InstituteResultsSection({ title, scope, region, emptyText, showLocation
                         </View>
                         <Text className={`mt-1 text-[12px] leading-5 ${darkMode ? 'text-gray-300' : 'text-gray-900'}`}>{institution.location}</Text>
                     </View>
-                    {institution.url ? <Pressable onPress={() => Linking.openURL(institution.url)} className="h-9 w-9 items-center justify-center rounded-full" style={{ borderWidth: 1, borderColor: darkMode ? '#3a3037' : '#f0e4e2' }}><Ionicons name="arrow-forward" size={16} color={palette.primary}/></Pressable> : null}
                 </View>
             ))}
             {!loading && !filtered.length && !error ? <Text className={`py-2 text-[13px] ${darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{emptyText}</Text> : null}
