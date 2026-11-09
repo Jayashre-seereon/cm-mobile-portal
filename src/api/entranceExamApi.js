@@ -40,6 +40,15 @@ function formatDate(value) {
   });
 }
 
+function formatApplicationDate(value, eligibility) {
+  if (String(eligibility || '').trim().toLowerCase() !== 'true' || !value || value === 'Date not available') {
+    return formatDate(value);
+  }
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) return value;
+  return parsedDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+}
+
 function formatSubjects(subjects) {
   if (!Array.isArray(subjects) || subjects.length === 0) {
     return 'Subjects not available';
@@ -79,8 +88,8 @@ function mapEntranceExam(item, index) {
     name: item?.examname || 'Unnamed Exam',
     authority: formatLabel(item?.stream?.name) || formatLabel(item?.category?.title) || 'Entrance Exam',
     date: formatDate(item?.exam_date),
-    issueDate: formatDate(item?.issuedate),
-    lastDate: formatDate(item?.lastdate),
+    issueDate: formatApplicationDate(item?.issuedate, item?.eligibility),
+    lastDate: formatApplicationDate(item?.lastdate, item?.eligibility),
     lastDateRaw: item?.lastdate || null,
     eligibility: item?.eligibility || 'Eligibility not available',
     type: formatLabel(item?.stream?.name) || 'All',
