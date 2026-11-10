@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { notifications as notificationItems } from './careermap-data';
 import { ensureAccessToken } from './api/axios';
 import { getNotifications } from './api/notificationApi';
@@ -301,6 +301,19 @@ export function AppStateProvider({ children }) {
     const [notifications, setNotifications] = useState(notificationItems);
     const [notificationsLoadFailed, setNotificationsLoadFailed] = useState(false);
 
+    const refreshNotifications = useCallback(async () => {
+        if (!accessToken || !hasAuthenticatedSession) return [];
+        try {
+            const items = await getNotifications();
+            setNotifications(items);
+            setNotificationsLoadFailed(false);
+            return items;
+        } catch (error) {
+            setNotificationsLoadFailed(true);
+            throw error;
+        }
+    }, [accessToken, hasAuthenticatedSession]);
+
     useEffect(() => {
         if ((accessToken || refreshToken) && !hasAuthenticatedSession) {
             markAuthenticatedSession();
@@ -320,30 +333,9 @@ export function AppStateProvider({ children }) {
             return undefined;
         }
 
-        let isMounted = true;
-
-        async function loadNotifications() {
-            try {
-                const items = await getNotifications();
-
-                if (isMounted) {
-                    setNotifications(items);
-                    setNotificationsLoadFailed(false);
-                }
-            }
-            catch (_error) {
-                if (isMounted) {
-                    setNotificationsLoadFailed(true);
-                }
-            }
-        }
-
-        loadNotifications();
-
-        return () => {
-            isMounted = false;
-        };
-    }, [accessToken, hasAuthenticatedSession]);
+        void refreshNotifications().catch(() => {});
+        return undefined;
+    }, [accessToken, hasAuthenticatedSession, refreshNotifications]);
 
     useEffect(() => {
         if (!accessToken || !hasAuthenticatedSession) {
@@ -576,10 +568,11 @@ export function AppStateProvider({ children }) {
         }),
         subscriptionRecords,
         notifications,
+        refreshNotifications,
         unreadNotificationsCount: notifications.filter((item) => item.unread).length,
         notificationsLoadFailed,
         freeAccessUsage,
-  }), [activePlanId, activeSubscriptionPlanIds, bookings, freeAccessUsage, notifications, notificationsLoadFailed, onboarding, preferences, profileEditRequestKey, promoMessage, savedCareers, subscriptionRecords, testHistory, userProfile]);
+  }), [activePlanId, activeSubscriptionPlanIds, bookings, freeAccessUsage, notifications, notificationsLoadFailed, onboarding, preferences, profileEditRequestKey, promoMessage, refreshNotifications, savedCareers, subscriptionRecords, testHistory, userProfile]);
     return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;
 }
 export function useAppState() {

@@ -1,14 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { Text, View } from 'react-native';
 import { useAppState } from '../../src/app-state';
-import { getNotifications } from '../../src/api/notificationApi';
 import { palette } from '../../src/careermap-data';
 import { AnimatedPressable, Screen, SectionHeader } from '../../src/careermap-ui';
 import { useAuthStore } from '../../src/store/auth-store';
 
 export default function NotificationsScreen() {
-    const { preferences, notifications: appNotifications } = useAppState();
+    const { preferences, notifications: appNotifications, refreshNotifications } = useAppState();
     const accessToken = useAuthStore((state) => state.accessToken);
     const hasAuthenticatedSession = useAuthStore((state) => state.hasAuthenticatedSession);
     const [notifications, setNotifications] = useState(appNotifications);
@@ -25,6 +25,17 @@ export default function NotificationsScreen() {
 
         setNotifications(appNotifications);
     }, [accessToken, hasAuthenticatedSession, appNotifications]);
+
+    useFocusEffect(useCallback(() => {
+        if (!accessToken || !hasAuthenticatedSession) return undefined;
+        let active = true;
+        setIsLoading(true);
+        refreshNotifications()
+            .then(() => { if (active) setLoadError(''); })
+            .catch(() => { if (active) setLoadError('Failed to load notifications.'); })
+            .finally(() => { if (active) setIsLoading(false); });
+        return () => { active = false; };
+    }, [accessToken, hasAuthenticatedSession, refreshNotifications]));
 
     return (<Screen>
       <SectionHeader title="Notifications" subtitle="Recent updates from mentors, scholarships, and learning content."/>
@@ -97,8 +108,7 @@ export default function NotificationsScreen() {
         }
         setIsLoading(true);
         try {
-          const items = await getNotifications();
-          setNotifications(items);
+          await refreshNotifications();
           setLoadError('');
         } catch (_error) {
           setLoadError('Failed to refresh notifications.');
