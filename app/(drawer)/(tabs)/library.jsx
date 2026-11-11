@@ -112,7 +112,9 @@ function InstituteResultsSection({ title, scope, region, badge, emptyText, showL
                 if (!active || requestId !== requestIdRef.current) return;
                 setInstitutes([]);
                 setPagination(null);
-                setError(fetchError?.response?.data?.message || 'Unable to load institutes.');
+                const serverMessage = fetchError?.response?.data?.message || fetchError?.response?.data?.error;
+                const status = fetchError?.response?.status;
+                setError(serverMessage || (status ? `Unable to load institutes (error ${status}).` : 'Unable to connect to the institute service. Check your connection and retry.'));
             })
             .finally(() => {
                 if (active && requestId === requestIdRef.current) setLoading(false);
