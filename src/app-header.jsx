@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import { Image, Pressable, StatusBar, Text, View } from 'react-native';
 import { router } from 'expo-router';
+import { DrawerActions, useNavigation } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppState } from './app-state';
 import { palette } from './careermap-data';
@@ -11,6 +12,7 @@ export function AppHeader() {
   const { preferences, unreadNotificationsCount } = useAppState();
   const [searchOpen, setSearchOpen] = useState(false);
   const insets = useSafeAreaInsets();
+  const navigation = useNavigation();
   const dark = preferences.darkMode;
   const backgroundColor = dark ? '#050505' : palette.background;
 
@@ -20,6 +22,9 @@ export function AppHeader() {
       <View style={{ paddingTop: insets.top, backgroundColor }}>
       <View className={`h-[56px] flex-row items-center justify-between px-5 ${dark ? 'bg-[#050505]' : 'bg-paper'}`}>
         <View className="min-w-0 flex-1 flex-row items-center gap-3">
+          <Pressable accessibilityLabel="Open menu" onPress={() => navigation.dispatch(DrawerActions.toggleDrawer())} className={`h-[40px] w-[40px] items-center justify-center rounded-[14px] border ${dark ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`}>
+            <Ionicons name="menu" size={23} color={dark ? '#ffffff' : palette.text} />
+          </Pressable>
           <Image source={require('../assets/images/logo_white.png')} resizeMode="contain" style={{ width: 64, height: 36 }} />
         </View>
         <View className="flex-row items-center gap-2">

@@ -111,12 +111,12 @@ export default function TabsLayout() {
             tabBarStyle: {
                 backgroundColor: preferences.darkMode ? '#050505' : palette.surface,
                 borderTopColor: preferences.darkMode ? '#1a1a1a' : palette.border,
-                height: 58 + Math.max(insets.bottom, 8),
+                height: 64 + Math.max(insets.bottom, 8),
                 paddingBottom: Math.max(insets.bottom, 8),
-                paddingTop: 8,
+                paddingTop: 6,
             },
             tabBarLabelStyle: {
-                fontSize: 12,
+                fontSize: 10,
                 fontWeight: '700',
             },
         }}>
@@ -125,7 +125,7 @@ export default function TabsLayout() {
             tabBarIcon: ({ color, size }) => <Ionicons name="home" size={size} color={color}/>,
         }}/>
       <Tabs.Screen name="library" options={{
-            title: 'Library',
+            title: 'Career Archive',
             tabBarIcon: lockedTabIcon('library', 'book', 'lock-closed'),
         }} listeners={{
             tabPress: (event) => handleBlockedTabPress('library', event),

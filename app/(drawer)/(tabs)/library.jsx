@@ -36,9 +36,9 @@ function normalizeInstituteItems(value) {
                  url: null,   
             };
         }
-        const city = item?.city || '';
-        const state = item?.state || '';
-        const country = item?.countruy || item?.country || '';
+        const city = typeof item?.city === 'string' ? item.city : item?.city?.name || '';
+        const state = typeof item?.state === 'string' ? item.state : item?.state?.name || '';
+        const country = item?.countruy || (typeof item?.country === 'string' ? item.country : item?.country?.name) || '';
         const location = [city, state, country].filter(Boolean).join(', ') || item?.location || 'Location not available';
         return {
             id: item?.id ?? `institution-${index}`,
@@ -51,6 +51,9 @@ function normalizeInstituteItems(value) {
             logo: item?.logo || item?.image || null,
             isTop: Boolean(item?.is_top ?? item?.isTop),
             url: item?.url || item?.website || null,
+            raw: item?.raw || item,
+            admissionProcess: item?.admissionProcess || item?.admission_process || item?.raw?.admission_process || '',
+            tentativeDate: item?.tentativeDate || item?.tentative_date || item?.raw?.tentative_date || null,
         };
     });
 }
@@ -64,7 +67,7 @@ const INDIA_STATE_OPTIONS = [
 ];
 const normalizeLocationFilter = (value) => String(value || '').trim().toLowerCase();
 
-function InstituteResultsSection({ title, scope, region, emptyText, showLocationFilters = true }) {
+function InstituteResultsSection({ title, scope, region, badge, emptyText, showLocationFilters = true }) {
     const { preferences } = useAppState();
     const darkMode = preferences.darkMode;
     const [filter, setFilter] = useState('all');
@@ -119,6 +122,11 @@ function InstituteResultsSection({ title, scope, region, emptyText, showLocation
 
     const totalItems = Number(pagination?.total ?? pagination?.totalCount ?? 0);
     const totalPages = Math.max(1, Number(pagination?.totalPages || Math.ceil(totalItems / pageSize) || 1));
+    const formatTentativeDate = (value) => {
+        if (!value) return '';
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+    };
     const filtered = institutes.filter((item) => {
         if (!showLocationFilters) return true;
         if (country === 'India') return normalizeLocationFilter(item.country) === 'india';
@@ -180,20 +188,38 @@ function InstituteResultsSection({ title, scope, region, emptyText, showLocation
                     })}
                 </View>
             )}
-            {filtered.map((institution, index) => (
-                <View key={`${institution.id}-${index}`} className={`mb-3 flex-row items-center gap-3 rounded-[14px] border px-3 py-3 ${darkMode ? 'border-[#292329] bg-[#0b0b0b]' : 'border-[#f0e4e2] bg-white'}`}>
-                    <View className="h-[48px] w-[48px] overflow-hidden rounded-[12px]" style={{ backgroundColor: `${palette.primary}12` }}>
-                        {institution.logo ? <Image source={{ uri: institution.logo }} style={{ width: '100%', height: '100%' }} resizeMode="cover"/> : <View className="flex-1 items-center justify-center"><Ionicons name="business-outline" size={20} color={palette.primary}/></View>}
-                    </View>
-                    <View className="flex-1">
-                        <View className="flex-row flex-wrap items-center gap-2">
-                            <Text className={`shrink text-[14px] font-semibold ${darkMode ? 'text-white' : 'text-ink'}`}>{institution.name}</Text>
-                            {institution.type ? <View className="rounded-full px-2 py-0.5" style={{ backgroundColor: `${palette.primary}12` }}><Text className="text-[10px] font-bold" style={{ color: palette.primary }}>{institution.type}</Text></View> : null}
+            {filtered.map((institution, index) => {
+                const isGovernment = String(institution.type || '').toLowerCase().includes('gov');
+                const tentativeDate = formatTentativeDate(institution.tentativeDate);
+                return (
+                    <View key={`${institution.id}-${index}`} className={`mb-3 overflow-hidden rounded-[20px] border ${darkMode ? 'border-[#292329] bg-[#0b0b0b]' : 'border-[#f0e4e2] bg-white'}`}>
+                        <View className={`flex-row items-center justify-between border-b px-4 py-3 ${darkMode ? 'border-[#292329]' : 'border-[#f7eeec]'}`}>
+                            <View className="flex-row items-center gap-2">
+                                <View className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: isGovernment ? '#2f9367' : '#c9a11d' }}/>
+                                <Text className="text-[10px] font-bold uppercase tracking-widest" style={{ color: darkMode ? '#b7aeb9' : '#a5847c' }}>{isGovernment ? 'Government' : 'Private'}</Text>
+                            </View>
+                            {badge ? <Text className="rounded-full px-2 py-1 text-[10px] font-semibold" style={{ backgroundColor: isGovernment ? '#eaf7ef' : '#fdf0ee', color: isGovernment ? '#2f9367' : palette.primary }}>{badge}</Text> : null}
                         </View>
-                        <Text className={`mt-1 text-[12px] leading-5 ${darkMode ? 'text-gray-300' : 'text-gray-900'}`}>{institution.location}</Text>
+                        <View className="flex-row items-start gap-3 px-4 py-4">
+                            <View className={`h-[56px] w-[56px] items-center justify-center overflow-hidden rounded-[16px] border ${darkMode ? 'border-[#292329] bg-[#111111]' : 'border-[#f0e4e2] bg-[#fffaf8]'}`}>
+                                {institution.logo ? <Image source={{ uri: institution.logo }} style={{ width: '100%', height: '100%' }} resizeMode="cover"/> : <Ionicons name="business-outline" size={22} color={palette.primary}/>}
+                            </View>
+                            <View className="flex-1">
+                                <Text className={`text-[15px] font-black leading-5 ${darkMode ? 'text-white' : 'text-ink'}`}>{institution.name}</Text>
+                                <View className="mt-2 flex-row flex-wrap gap-2">
+                                    {institution.state ? <Text className="rounded-full px-2 py-1 text-[10px] font-semibold" style={{ backgroundColor: darkMode ? '#12302d' : '#e9f5f3', color: '#0f8a7c' }}>{institution.state}</Text> : null}
+                                    {institution.city ? <Text className="rounded-full px-2 py-1 text-[10px] font-semibold" style={{ backgroundColor: darkMode ? '#301b1d' : '#fdf0ee', color: palette.primary }}>{institution.city}</Text> : null}
+                                </View>
+                            </View>
+                        </View>
+                        {institution.admissionProcess || tentativeDate ? <View className={`flex-row flex-wrap gap-2 border-t px-4 py-3 ${darkMode ? 'border-[#292329]' : 'border-[#f7eeec]'}`}>
+                            {institution.admissionProcess ? <View className={`min-w-[45%] flex-1 rounded-[12px] px-3 py-2 ${darkMode ? 'bg-[#171313]' : 'bg-[#fff8f4]'}`}><Text className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#b8837e' }}>Admission Via</Text><Text className={`mt-1 text-[12px] font-semibold ${darkMode ? 'text-white' : 'text-ink'}`}>{institution.admissionProcess}</Text></View> : null}
+                            {tentativeDate ? <View className={`min-w-[45%] flex-1 rounded-[12px] px-3 py-2 ${darkMode ? 'bg-[#111923]' : 'bg-[#f7fbff]'}`}><Text className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#6c88a8' }}>Tentative Date</Text><Text className={`mt-1 text-[12px] font-semibold ${darkMode ? 'text-white' : 'text-ink'}`}>{tentativeDate}</Text></View> : null}
+                        </View> : null}
+                        {institution.url && institution.url !== '#' ? <Pressable onPress={() => Linking.openURL(institution.url).catch(() => {})} className={`flex-row items-center gap-2 border-t px-4 py-3 ${darkMode ? 'border-[#292329]' : 'border-[#f7eeec]'}`}><Text className="text-[13px] font-bold" style={{ color: palette.primary }}>Explore institution</Text><Ionicons name="arrow-forward" size={15} color={palette.primary}/></Pressable> : null}
                     </View>
-                </View>
-            ))}
+                );
+            })}
             {!loading && !filtered.length && !error ? <Text className={`py-2 text-[13px] ${darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{emptyText}</Text> : null}
             {error ? (
                 <View className="flex-row items-center justify-between gap-3 py-2">
@@ -1251,12 +1277,14 @@ export default function CareerLibraryScreen() {
   title="Institutes outside Odisha"
   scope={instituteScope}
   region="outside"
+  badge="Outside Odisha"
   emptyText="No institutes found outside Odisha."
 />
 <InstituteResultsSection
   title="Institutes in Odisha"
   scope={instituteScope}
   region="inside"
+  badge="Odisha"
   emptyText="No Odisha institutes found for this selection."
   showLocationFilters={false}
 />

@@ -738,7 +738,7 @@ export default function HomeScreen() {
     </Screen>);
   }
   return (<Screen>
-    <View className="overflow-hidden rounded-[28px] bg-brand p-[22px]" style={{ marginTop: 18, marginBottom: 12 }}>
+    <View className="overflow-hidden rounded-[28px] bg-brand p-[22px]" style={{ marginTop: 4, marginBottom: 12 }}>
       <View className="absolute bottom-[-34px] right-[-28px] h-[148px] w-[148px] rounded-full bg-white/10" />
 
       <View className="gap-2">
