@@ -57,7 +57,7 @@ export default function DrawerRoot() {
             drawerIcon: renderDrawerIcon('card-outline'),
         }}/>
         <Drawer.Screen name="library" options={{
-            title: 'Library',
+            title: 'Career Archive',
             drawerIcon: renderDrawerIcon('book-outline'),
         }}/>
         <Drawer.Screen name="learn" options={{
