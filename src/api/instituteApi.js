@@ -35,9 +35,9 @@ function getInstituteIcon(instituteType) {
 }
 
 function mapInstituteItem(item, index) {
-  const country = item?.countruy || '';   
-  const state = item?.state || '';
-  const city = item?.city || '';
+  const country = item?.countruy || item?.country?.name || item?.country || '';
+  const state = item?.state?.name || item?.state || '';
+  const city = item?.city?.name || item?.city || '';
   const instituteType = item?.institute_type || 'Institute';
   const courses = Array.isArray(item?.course_offered) ? item.course_offered.filter(Boolean) : [];
   const categoryObj = item?.category ?? item?.categoryObj ?? null;
@@ -56,6 +56,9 @@ function mapInstituteItem(item, index) {
     logo: item?.logo || null,
     about: stripHtml(item?.about) || 'About information is not available right now.',
     website: item?.url || '#',
+    raw: item,
+    admissionProcess: item?.admission_process || '',
+    tentativeDate: item?.tentative_date || item?.tentativeDate || null,
     categoryId: item?.categoryId ?? null,
     secondcategoryId: item?.secondcategoryId ?? null,
     subcategoryId: item?.subcategoryId ?? null,
