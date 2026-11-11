@@ -6,7 +6,7 @@ import { Pressable, ScrollView, Text, View ,Linking, useWindowDimensions} from '
 import RenderHTML from 'react-native-render-html';import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCareerLibraryCategoriesByStream, getCareerLibraryDetails, getCareerLibraryNext, getCareerLibraryStreams, startCareerLibraryPreview } from '../../../src/api/careerLibraryApi';
 import { getCareerLibraryInstitutions } from '../../../src/api/instituteApi';
-import { checkModuleAccess } from '../../../src/api/moduleAccessApi';
+import { checkModuleAccess, getModules } from '../../../src/api/moduleAccessApi';
 import { useAppState } from '../../../src/app-state';
 import { Screen, UnlockBottomSheet, mobileAssistantScrollProps } from '../../../src/careermap-ui';
 import { palette } from '../../../src/careermap-data';
@@ -207,8 +207,8 @@ function InstituteResultsSection({ title, scope, region, badge, emptyText, showL
                             <View className="flex-1">
                                 <Text className={`text-[15px] font-black leading-5 ${darkMode ? 'text-white' : 'text-ink'}`}>{institution.name}</Text>
                                 <View className="mt-2 flex-row flex-wrap gap-2">
-                                    {institution.state ? <Text className="rounded-full px-2 py-1 text-[10px] font-semibold" style={{ backgroundColor: darkMode ? '#12302d' : '#e9f5f3', color: '#0f8a7c' }}>{institution.state}</Text> : null}
-                                    {institution.city ? <Text className="rounded-full px-2 py-1 text-[10px] font-semibold" style={{ backgroundColor: darkMode ? '#301b1d' : '#fdf0ee', color: palette.primary }}>{institution.city}</Text> : null}
+                                    {institution.state ? <View style={{ alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: darkMode ? '#12302d' : '#e9f5f3' }}><Text className="text-[11px] font-semibold" style={{ color: '#0f8a7c' }}>{institution.state}</Text></View> : null}
+                                    {institution.city ? <View style={{ alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: darkMode ? '#301b1d' : '#fdf0ee' }}><Text className="text-[11px] font-semibold" style={{ color: palette.primary }}>{institution.city}</Text></View> : null}
                                 </View>
                             </View>
                         </View>
@@ -494,16 +494,32 @@ export default function CareerLibraryScreen() {
     const [previewRemaining, setPreviewRemaining] = useState(0);
     const [previewExpired, setPreviewExpired] = useState(false);
     const [moduleAccessReady, setModuleAccessReady] = useState(false);
+    const [discoveredModuleId, setDiscoveredModuleId] = useState(null);
     const previewIntervalRef = useRef(null);
+    const categoryRequestIdRef = useRef(0);
     const resolvedModuleId = useMemo(() => {
         const parsed = Number(params.moduleId);
-        return Number.isFinite(parsed) ? parsed : 60;
-    }, [params.moduleId]);
+        return Number.isFinite(parsed) ? parsed : discoveredModuleId || 60;
+    }, [discoveredModuleId, params.moduleId]);
     const instituteScope = useMemo(() => ({
         categoryId: selectedCategory?.id || selectedSecondCategory?.categoryId || selectedSubCategory?.categoryId || selectedDetailSource?.categoryId || '',
         secondcategoryId: selectedSecondCategory?.id || selectedSubCategory?.secondcategoryId || selectedDetailSource?.secondcategoryId || '',
         subcategoryId: selectedSubCategory?.id || selectedDetailSource?.subcategoryId || '',
     }), [selectedCategory?.id, selectedSecondCategory?.id, selectedSecondCategory?.categoryId, selectedSubCategory?.id, selectedSubCategory?.categoryId, selectedSubCategory?.secondcategoryId, selectedDetailSource?.categoryId, selectedDetailSource?.secondcategoryId, selectedDetailSource?.subcategoryId]);
+
+    useEffect(() => {
+        if (params.moduleId) return;
+        let active = true;
+        getModules().then((modules) => {
+            const archive = modules.find((module) => {
+                const title = String(module?.title || '').trim().toLowerCase();
+                return title.includes('career') && (title.includes('archive') || title.includes('library'));
+            });
+            const id = Number(archive?.id);
+            if (active && Number.isFinite(id)) setDiscoveredModuleId(id);
+        }).catch(() => {});
+        return () => { active = false; };
+    }, [params.moduleId]);
 
     const resetToStreams = () => {
         setShowUnlockSheet(false);
@@ -685,15 +701,31 @@ export default function CareerLibraryScreen() {
         setError('');
         setSelectedDetailSource(null);
         if (type === 'stream') {
+            const requestId = ++categoryRequestIdRef.current;
             setSelectedStream(item);
             setSelectedCategory(null);
             setSelectedSecondCategory(null);
             setSelectedSubCategory(null);
             setDetails([]);
+            setCategories([]);
             setCurrentLevel('categories');
             setDetailReturnLevel('streams');
             try {
-                const response = await getCareerLibraryCategoriesByStream(id, resolvedModuleId);
+                let moduleId = resolvedModuleId;
+                if (!params.moduleId && !discoveredModuleId) {
+                    const modules = await getModules();
+                    const archive = modules.find((module) => {
+                        const title = String(module?.title || '').trim().toLowerCase();
+                        return title.includes('career') && (title.includes('archive') || title.includes('library'));
+                    });
+                    const discoveredId = Number(archive?.id);
+                    if (Number.isFinite(discoveredId)) {
+                        moduleId = discoveredId;
+                        setDiscoveredModuleId(discoveredId);
+                    }
+                }
+                const response = await getCareerLibraryCategoriesByStream(id, moduleId);
+                if (requestId !== categoryRequestIdRef.current) return;
                 const data = response ?? {};
                 const nextItems = Array.isArray(data?.data) ? data.data : [];
                 setCategories(nextItems);
@@ -702,11 +734,15 @@ export default function CareerLibraryScreen() {
                 setDetails([]);
                 setCurrentLevel('categories');
             }
-            catch (_fetchError) {
-                setError('Unable to load categories. Please try again.');
+            catch (fetchError) {
+                if (requestId !== categoryRequestIdRef.current) return;
+                const status = fetchError?.response?.status;
+                const serverMessage = fetchError?.response?.data?.message || fetchError?.response?.data?.error;
+                setCategories([]);
+                setError(serverMessage || (status ? `Categories could not be loaded (error ${status}). Tap Retry.` : 'Could not connect to load categories. Check your connection and tap Retry.'));
             }
             finally {
-                setLoading(false);
+                if (requestId === categoryRequestIdRef.current) setLoading(false);
             }
             return;
         }
@@ -1326,8 +1362,9 @@ export default function CareerLibraryScreen() {
           {renderStreamGrid(streamItems)}
         </ScrollView>) : currentLevel === 'categories' ? (<ScrollView className="flex-1" contentContainerClassName="gap-3 px-5 pb-2" contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 72, 88) }} showsVerticalScrollIndicator={false} {...mobileAssistantScrollProps}>
           {loading ? (<Text className={`mt-4 text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Loading categories...</Text>) : null}
-          {error ? (<Text className="mt-4 text-[13px] font-semibold text-red-500">{error}</Text>) : null}
+          {error ? (<View className={`mt-4 flex-row items-center justify-between gap-3 rounded-[14px] border px-3 py-3 ${preferences.darkMode ? 'border-red-900 bg-[#241414]' : 'border-red-200 bg-red-50'}`}><Text className="flex-1 text-[13px] font-semibold text-red-600">{error}</Text>{selectedStream ? <Pressable onPress={() => handleClick('stream', selectedStream.id, selectedStream)} className="rounded-full bg-brand px-3 py-2"><Text className="text-[12px] font-bold text-white">Retry</Text></Pressable> : null}</View>) : null}
           {renderCategoryGrid(categories)}
+          {!loading && !error && categories.length === 0 ? <Text className={`mt-4 text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No categories are available for this stream yet.</Text> : null}
         </ScrollView>) : currentLevel === 'details' ? (<ScrollView className="flex-1" contentContainerClassName="gap-3 px-5 pb-2" contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 72, 88) }} showsVerticalScrollIndicator={false} {...mobileAssistantScrollProps}>
           {loading ? (<Text className={`mt-4 text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Loading details...</Text>) : null}
           {error ? (<Text className="mt-4 text-[13px] font-semibold text-red-500">{error}</Text>) : null}
