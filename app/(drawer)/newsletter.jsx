@@ -3,7 +3,7 @@ import { Image, Linking, Pressable, ScrollView, Text, View } from 'react-native'
 import { useEffect, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { getNewsletters } from '../../src/api/newsletterApi';
-import { checkModuleAccess } from '../../src/api/moduleAccessApi';
+import { checkModuleAccess, getModules } from '../../src/api/moduleAccessApi';
 import { useAppState } from '../../src/app-state';
 import { Screen, UnlockBottomSheet, mobileAssistantScrollProps } from '../../src/careermap-ui';
 import { palette } from '../../src/careermap-data';
@@ -44,18 +44,22 @@ export default function NewsletterScreen() {
     let mounted = true;
 
     async function resolveAccess() {
-      const moduleId = Number(params?.moduleId);
-
-      // If we have no moduleId to check against, fall back to whatever was passed in nav params.
-      if (!Number.isFinite(moduleId)) {
-        const explicitMode = normalizeMode(params?.accessStatus, undefined);
-        if (mounted) setResolvedAccessStatus(explicitMode);
-        return;
-      }
-
-      // Otherwise always resolve live from the API — this is the source of truth,
-      // not the (possibly stale) accessStatus param from the previous screen.
       try {
+        let moduleId = Number(params?.moduleId);
+        if (!Number.isFinite(moduleId)) {
+          const modules = await getModules();
+          const matched = modules.find((module) => {
+            const title = String(module?.title || '').trim().toLowerCase();
+            return title.includes('career insights') || title.includes('career newsletter') || title.includes('newsletter');
+          });
+          moduleId = Number(matched?.id);
+        }
+
+        if (!Number.isFinite(moduleId)) {
+          if (mounted) setResolvedAccessStatus(normalizeMode(params?.accessStatus, undefined));
+          return;
+        }
+
         const response = await checkModuleAccess(moduleId);
         if (!mounted) return;
         setResolvedAccessStatus(normalizeMode(response?.mode, response?.allowed));

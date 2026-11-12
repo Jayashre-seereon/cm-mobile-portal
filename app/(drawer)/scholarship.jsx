@@ -6,7 +6,7 @@ import RenderHTML from 'react-native-render-html';
 import { useAppState } from '../../src/app-state';
 import { palette } from '../../src/careermap-data';
 import { getScholarships, startScholarshipPreview ,getCategories} from '../../src/api/scholarshipApi';
-import { checkModuleAccess } from '../../src/api/moduleAccessApi';
+import { checkModuleAccess, getModules } from '../../src/api/moduleAccessApi';
 import { AnimatedPressable, HierarchyFilterPanel, Pill, Screen, SectionHeader, UnlockBottomSheet } from '../../src/careermap-ui';
 import { buildHierarchyOptions, filterByHierarchy } from '../../src/utils/hierarchy';
 import { openSubscriptionPrompt } from '../../src/subscription-flow';
@@ -51,7 +51,7 @@ const [showTypeDropdown, setShowTypeDropdown] = useState(false);
 ];
     const resolvedModuleId = useMemo(() => {
         const parsed = Number(params.moduleId);
-        return Number.isFinite(parsed) ? parsed : 71;
+        return params.moduleId && Number.isFinite(parsed) ? parsed : null;
     }, [params.moduleId]);
     const animationKey = selectedId !== null
         ? `scholarship-${selectedId}`
@@ -166,7 +166,17 @@ useEffect(() => {
         let isMounted = true;
         async function loadModuleAccess() {
             try {
-                const response = await checkModuleAccess(resolvedModuleId);
+                let moduleId = resolvedModuleId;
+                if (!Number.isFinite(moduleId)) {
+                    const modules = await getModules();
+                    const matched = modules.find((module) => String(module?.title || '').trim().toLowerCase().includes('scholarship'));
+                    moduleId = Number(matched?.id);
+                }
+                if (!Number.isFinite(moduleId)) {
+                    if (isMounted) setHasFullAccess(false);
+                    return;
+                }
+                const response = await checkModuleAccess(moduleId);
                 if (isMounted) {
                     setHasFullAccess(String(response?.mode || '').toLowerCase() === 'full' && response?.allowed !== false);
                 }

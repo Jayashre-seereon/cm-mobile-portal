@@ -1,13 +1,32 @@
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
 import { Text, View } from 'react-native';
+import { useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAppState } from '../../src/app-state';
 import { palette } from '../../src/careermap-data';
+import { checkModuleAccess, getModules } from '../../src/api/moduleAccessApi';
 import { AppHeader } from '../../src/app-header';
 import FloatingContactActions from '../../src/components/FloatingContactActions';
+import { UnlockBottomSheet } from '../../src/careermap-ui';
+import { openSubscriptionPrompt } from '../../src/subscription-flow';
+
+const drawerModuleAccess = {
+    library: { title: 'Career Archive', match: ['career archive', 'career library'], path: '/(drawer)/(tabs)/library' },
+    learn: { title: 'Career & Personality Videos', match: ['career & personality videos', 'masterclass'], path: '/(drawer)/(tabs)/learn' },
+    'entrance-exam': { title: 'Entrance Exam', match: ['entrance exam'], path: '/(drawer)/entrance-exam' },
+    'book-mentor': { title: 'Book Your Mentor', match: ['book your mentor', 'book mentor', 'mentor'], path: '/(drawer)/book-mentor' },
+    scholarship: { title: 'Scholarships', match: ['scholarship'], path: '/(drawer)/scholarship' },
+    institute: { title: 'Institutes', match: ['institute'], path: '/(drawer)/institute' },
+    newsletter: { title: 'Career Insights', match: ['career insights', 'career newsletter', 'newsletter'], path: '/(drawer)/newsletter' },
+    abroad: { title: 'Study Abroad', match: ['study abroad', 'abroad'], path: '/(drawer)/abroad' },
+    quiz: { title: 'Quiz', match: ['quiz'], path: '/(drawer)/quiz' },
+};
+
 export default function DrawerRoot() {
     const { preferences, unreadNotificationsCount } = useAppState();
+    const [lockedModule, setLockedModule] = useState(null);
     const renderDrawerIcon = (name) => {
         const DrawerIcon = ({ color, size }) => (<View className="items-center justify-center">
         <Ionicons name={name} color={color} size={size}/>
@@ -18,6 +37,48 @@ export default function DrawerRoot() {
         DrawerIcon.displayName = `${name.replace(/[^a-z0-9]/gi, '')}DrawerIcon`;
         return DrawerIcon;
     };
+    const handleModuleDrawerPress = async (event, routeKey) => {
+        event.preventDefault();
+        const config = drawerModuleAccess[routeKey];
+        if (!config) return;
+
+        try {
+            const modules = await getModules();
+            const matched = modules.find((module) => {
+                const title = String(module?.title || '').trim().toLowerCase();
+                return config.match.some((fragment) => title.includes(fragment));
+            });
+            const moduleId = Number(matched?.id);
+            if (!Number.isFinite(moduleId)) {
+                router.push(config.path);
+                return;
+            }
+
+            const access = await checkModuleAccess(moduleId);
+            if (!access?.allowed) {
+                setLockedModule({
+                    title: `${config.title} Access Locked`,
+                    message: access?.message || `Subscribe to unlock ${config.title.toLowerCase()}.`,
+                    returnTarget: { pathname: config.path, params: { moduleId: String(moduleId) } },
+                });
+                return;
+            }
+
+            router.push({
+                pathname: config.path,
+                params: {
+                    moduleId: String(moduleId),
+                    accessStatus: access.freePreview ? 'preview' : 'unlocked',
+                },
+            });
+        } catch (error) {
+            console.log('Drawer module access check failed', error?.response?.data || error?.message || error);
+            router.push(config.path);
+        }
+    };
+    const moduleDrawerListeners = (routeKey) => ({
+        drawerItemPress: (event) => { void handleModuleDrawerPress(event, routeKey); },
+    });
     return (<GestureHandlerRootView style={{ flex: 1 }}>
         <Drawer screenOptions={{
             header: () => <AppHeader />,
@@ -39,7 +100,7 @@ export default function DrawerRoot() {
         <Drawer.Screen name="library" options={{
             title: 'Career Archive',
             drawerIcon: renderDrawerIcon('book-outline'),
-        }}/>
+        }} listeners={moduleDrawerListeners('library')}/>
         <Drawer.Screen name="psychometric-test" options={{
             title: 'Career Psychometric Assessment',
             drawerLabel: 'Career Psychometric Assessment',
@@ -49,31 +110,31 @@ export default function DrawerRoot() {
             title: 'Career & Personality Videos',
             drawerLabel: 'Career & Personality Videos',
             drawerIcon: renderDrawerIcon('school-outline'),
-        }}/>
+        }} listeners={moduleDrawerListeners('learn')}/>
         <Drawer.Screen name="entrance-exam" options={{
             title: 'Entrance Exam',
             drawerIcon: renderDrawerIcon('clipboard-outline'),
-        }}/>
+        }} listeners={moduleDrawerListeners('entrance-exam')}/>
         <Drawer.Screen name="book-mentor" options={{
             title: 'Book Your Mentor',
             drawerIcon: renderDrawerIcon('people-outline'),
-        }}/>
+        }} listeners={moduleDrawerListeners('book-mentor')}/>
         <Drawer.Screen name="scholarship" options={{
             title: 'Scholarships',
             drawerIcon: renderDrawerIcon('ribbon-outline'),
-        }}/>
+        }} listeners={moduleDrawerListeners('scholarship')}/>
         <Drawer.Screen name="institute" options={{
             title: 'Institutes',
             drawerIcon: renderDrawerIcon('business-outline'),
-        }}/>
+        }} listeners={moduleDrawerListeners('institute')}/>
         <Drawer.Screen name="newsletter" options={{
             title: 'Career Insights',
             drawerIcon: renderDrawerIcon('newspaper-outline'),
-        }}/>
+        }} listeners={moduleDrawerListeners('newsletter')}/>
         <Drawer.Screen name="abroad" options={{
             title: 'Study Abroad',
             drawerIcon: renderDrawerIcon('globe-outline'),
-        }}/>
+        }} listeners={moduleDrawerListeners('abroad')}/>
         <Drawer.Screen name="subscription" options={{
             title: 'Subscription',
             drawerIcon: renderDrawerIcon('card-outline'),
@@ -81,7 +142,7 @@ export default function DrawerRoot() {
         <Drawer.Screen name="quiz" options={{
             title: 'Quiz',
             drawerIcon: renderDrawerIcon('help-circle-outline'),
-        }}/>
+        }} listeners={moduleDrawerListeners('quiz')}/>
         <Drawer.Screen name="notifications" options={{
             title: 'Notifications',
             drawerIcon: renderDrawerIcon('notifications-outline'),
@@ -119,6 +180,16 @@ export default function DrawerRoot() {
             headerShown: false,
         }}/>
       </Drawer>
+      {lockedModule ? <UnlockBottomSheet
+        title={lockedModule.title}
+        subtitle={lockedModule.message}
+        onClose={() => setLockedModule(null)}
+        onPress={() => {
+            const returnTarget = lockedModule.returnTarget;
+            setLockedModule(null);
+            openSubscriptionPrompt(returnTarget);
+        }}
+      /> : null}
       <FloatingContactActions />
     </GestureHandlerRootView>);
 }
