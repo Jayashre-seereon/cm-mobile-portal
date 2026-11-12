@@ -3,7 +3,7 @@ import { useLocalSearchParams } from 'expo-router';
 import RenderHTML from 'react-native-render-html';
 import { useWindowDimensions } from 'react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Image, Modal, Pressable, ScrollView, Text, TextInput, View, Linking } from 'react-native';
+import { ActivityIndicator, Animated, Image, Modal, Pressable, ScrollView, Text, TextInput, View, Linking } from 'react-native';
 import { createMentorOrder, getBookedMentorSlots, getMentors, verifyMentorPayment,getCategories} from '../../src/api/mentorApi';
 import { checkModuleAccess, getModules } from '../../src/api/moduleAccessApi';
 import { useAppState } from '../../src/app-state';
@@ -167,6 +167,7 @@ const [resolvedModuleId, setResolvedModuleId] = useState(() => {
     const [isMentorLoading, setIsMentorLoading] = useState(false);
     const [selectedDate, setSelectedDate] = useState('');
     const [selectedSlot, setSelectedSlot] = useState('');
+    const [paymentNotice, setPaymentNotice] = useState('');
     const [showPayment, setShowPayment] = useState(false);
     const [showBookingPanel, setShowBookingPanel] = useState(false);
     const [selectedPayment, setSelectedPayment] = useState('');
@@ -180,6 +181,8 @@ const [resolvedModuleId, setResolvedModuleId] = useState(() => {
     const [paymentReference, setPaymentReference] = useState('');
     const [showUnlockSheet, setShowUnlockSheet] = useState(false);
     const [bookedSlots, setBookedSlots] = useState([]);
+    const [bookedSlotsLoading, setBookedSlotsLoading] = useState(false);
+    const [bookedSlotsError, setBookedSlotsError] = useState('');
     const [mentorsLoaded, setMentorsLoaded] = useState(false);
     const celebration = useRef(new Animated.Value(0)).current;
     const fallbackMentor = selectedMentorId ? mentorList.find((item) => String(item.id) === String(selectedMentorId)) || null : null;
@@ -384,9 +387,13 @@ const filteredMentors = useMemo(() => {
         const loadBookedSlots = async () => {
             if (!activeMentor?.id || !selectedDate) {
                 setBookedSlots([]);
+                setBookedSlotsError('');
+                setBookedSlotsLoading(false);
                 return;
             }
 
+            setBookedSlotsLoading(true);
+            setBookedSlotsError('');
             try {
                 const response = await getBookedMentorSlots(activeMentor.id, selectedDate);
                 if (isMounted) {
@@ -397,7 +404,10 @@ const filteredMentors = useMemo(() => {
                 console.log('Booked slots fetch failed', error?.response?.data || error?.message || error);
                 if (isMounted) {
                     setBookedSlots([]);
+                    setBookedSlotsError(error?.response?.data?.message || error?.message || 'Failed to load booked slots.');
                 }
+            } finally {
+                if (isMounted) setBookedSlotsLoading(false);
             }
         };
 
@@ -627,6 +637,7 @@ const filteredMentors = useMemo(() => {
             return;
         }
 
+        setPaymentNotice('');
         try {
             const orderResponse = await createMentorOrder({
                 mentorId: activeMentor.id,
@@ -680,9 +691,23 @@ const filteredMentors = useMemo(() => {
             setBooked(true);
         }
         catch (error) {
-            const message = error?.message || error?.response?.data?.message || 'Booking payment failed. Please try again.';
+            const message = error?.response?.status === 409
+                ? 'This time slot is already booked. Please choose another time slot.'
+                : error?.response?.data?.message || error?.message || 'Booking payment failed. Please try again.';
             if (!/cancelled/i.test(message)) {
-                Alert.alert('Payment issue', message);
+                setPaymentNotice(message);
+            }
+            if (error?.response?.status === 409 && activeMentor?.id && selectedDate) {
+                setSelectedSlot('');
+                setBookedSlotsLoading(true);
+                try {
+                    setBookedSlots(await getBookedMentorSlots(activeMentor.id, selectedDate));
+                    setBookedSlotsError('');
+                } catch (refreshError) {
+                    setBookedSlotsError(refreshError?.response?.data?.message || refreshError?.message || 'Failed to refresh booked slots.');
+                } finally {
+                    setBookedSlotsLoading(false);
+                }
             }
         }
     };
@@ -1021,6 +1046,7 @@ const filteredMentors = useMemo(() => {
                                 {dates.map((date) => (<Pressable key={date.key} disabled={!date.available} onPress={() => {
                                         setSelectedDate(date.key);
                                         setSelectedSlot('');
+                                        setPaymentNotice('');
                                     }} className="w-[62px] items-center gap-0.5 rounded-[16px] py-2.5" style={{
                                         backgroundColor: selectedDate === date.key ? palette.primary : preferences.darkMode ? '#111111' : '#f2ebe6',
                                         opacity: date.available ? 1 : 0.35,
@@ -1037,18 +1063,22 @@ const filteredMentors = useMemo(() => {
                                 <Text className={`text-[18px] font-black ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>Select Time</Text>
                                 <View className="flex-row flex-wrap gap-2.5">
                                     {slots.map((slot) => {
-                                        const slotDisabled = isSlotBooked(slot);
-                                        return (<Pressable key={slot} disabled={slotDisabled} className="rounded-[12px] px-[14px] py-2.5" onPress={() => setSelectedSlot(slot)} style={{ backgroundColor: selectedSlot === slot ? palette.primary : preferences.darkMode ? '#111111' : '#f2ebe6', opacity: slotDisabled ? 0.35 : 1 }}>
+                                        const slotBooked = isSlotBooked(slot);
+                                        const slotDisabled = slotBooked || bookedSlotsLoading || Boolean(bookedSlotsError);
+                                        return (<Pressable key={slot} disabled={slotDisabled} className="rounded-[12px] px-[14px] py-2.5" onPress={() => { setSelectedSlot(slot); setPaymentNotice(''); }} style={{ backgroundColor: selectedSlot === slot ? palette.primary : preferences.darkMode ? '#111111' : '#f2ebe6', opacity: slotDisabled ? 0.35 : 1 }}>
                                                 <Text className="text-[12px] font-extrabold" style={{ color: selectedSlot === slot ? '#fff' : palette.text }}>{slot}</Text>
-                                                {slotDisabled ? (<Text className="mt-0.5 text-[10px] font-bold" style={{ color: selectedSlot === slot ? '#fff' : palette.muted }}>
-                                                        Booked
+                                                {slotBooked || bookedSlotsLoading || bookedSlotsError ? (<Text className="mt-0.5 text-[10px] font-bold" style={{ color: selectedSlot === slot ? '#fff' : palette.muted }}>
+                                                        {slotBooked ? 'Booked' : bookedSlotsLoading ? 'Checking...' : 'Unavailable'}
                                                     </Text>) : null}
                                             </Pressable>);
                                     })}
                                 </View>
+                                {bookedSlotsLoading ? <Text className="text-[11px] font-semibold text-muted">Checking booked times...</Text> : null}
+                                {bookedSlotsError ? <Text className="text-[11px] font-semibold text-[#9a2119]">{bookedSlotsError}</Text> : null}
                             </View>) : null}
 
-                        <AnimatedPressable className="rounded-[16px] bg-brand py-[14px]" disabled={!selectedDate || !selectedSlot} onPress={handlePayment}>
+                        {paymentNotice ? <Text accessibilityRole="alert" className="rounded-[12px] border border-[#f2c7c2] bg-[#fff4f2] px-3 py-2 text-[12px] font-semibold text-[#9a2119]">{paymentNotice}</Text> : null}
+                        <AnimatedPressable className="rounded-[16px] bg-brand py-[14px]" disabled={!selectedDate || !selectedSlot || bookedSlotsLoading || Boolean(bookedSlotsError)} onPress={handlePayment}>
                             <Text className="text-center text-[14px] font-extrabold text-white">Book & Pay</Text>
                         </AnimatedPressable>
                     </View>
