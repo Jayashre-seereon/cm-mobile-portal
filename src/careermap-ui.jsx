@@ -272,6 +272,7 @@ export function LockedDetailOverlay({ title = 'Unlock', subtitle = 'Subscribe to
 
 export function UnlockBottomSheet({ title = 'Unlock More', subtitle = 'Subscribe to more', onClose, onPress, dismissible = true }) {
     const { preferences } = useAppState();
+    const insets = useSafeAreaInsets();
     const handleClose = dismissible ? onClose : undefined;
     return (<Modal animationType="fade" transparent visible onRequestClose={dismissible ? handleClose : () => {}}>
       <View className="flex-1 justify-end">
@@ -280,7 +281,7 @@ export function UnlockBottomSheet({ title = 'Unlock More', subtitle = 'Subscribe
           <View className={`absolute inset-0 ${preferences.darkMode ? 'bg-black/10' : 'bg-white/10'}`}/>
         </Pressable>
 
-        <View className="absolute inset-x-0 bottom-0 px-4 pb-4">
+        <View className="absolute inset-x-0 bottom-0 px-4" style={{ paddingBottom: Math.max(insets.bottom, 16) }}>
           <View className={`overflow-hidden rounded-[34px] border shadow-card ${preferences.darkMode ? 'border-[#1f1f1f] bg-[#080808]' : 'border-white/70 bg-white'}`} style={{
             shadowColor: '#ffffff',
             shadowOpacity: 0.28,
