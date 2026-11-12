@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Children, useRef, useState } from 'react';
+import { Children, useCallback, useRef, useState } from 'react';
 import { Animated, DeviceEventEmitter, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppState } from './app-state';
 import { AnimatedBackground } from './animated-background';
@@ -19,6 +20,12 @@ export const mobileAssistantScrollProps = {
 export function Screen({ children, scroll = true, contentContainerClassName = 'gap-[18px] px-5 py-5', animationKey = 'default' }) {
     const { preferences } = useAppState();
     const insets = useSafeAreaInsets();
+    const scrollViewRef = useRef(null);
+    useFocusEffect(useCallback(() => {
+      if (!scroll) return undefined;
+      const frame = requestAnimationFrame(() => scrollViewRef.current?.scrollTo({ y: 0, animated: false }));
+      return () => cancelAnimationFrame(frame);
+    }, [scroll]));
     const childArray = Children.toArray(children);
     const animatedChildren = childArray.map((child, index) => (<StaggerFadeUpItem key={index} index={index} style={!scroll && (childArray.length === 1 || index > 0) ? { flex: 1, minHeight: 0 } : undefined}>
       {child}
@@ -27,7 +34,7 @@ export function Screen({ children, scroll = true, contentContainerClassName = 'g
     return (<SafeAreaView className={`flex-1 ${preferences.darkMode ? 'bg-[#050505]' : 'bg-paper'}`} edges={['bottom']}>
       <AnimatedBackground />
       <ZoomInPage key={animationKey} style={{ flex: 1 }}>
-        {scroll ? (<ScrollView className="flex-1" contentContainerClassName={contentContainerClassName} contentContainerStyle={{ paddingBottom: contentPaddingBottom }} showsVerticalScrollIndicator={false} {...mobileAssistantScrollProps}>
+        {scroll ? (<ScrollView ref={scrollViewRef} className="flex-1" contentContainerClassName={contentContainerClassName} contentContainerStyle={{ paddingBottom: contentPaddingBottom }} showsVerticalScrollIndicator={false} {...mobileAssistantScrollProps}>
             {animatedChildren}
           </ScrollView>) : (<View className={contentContainerClassName} style={{ flex: 1 }}>
             {animatedChildren}
