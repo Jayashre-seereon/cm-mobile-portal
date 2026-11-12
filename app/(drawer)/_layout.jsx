@@ -36,9 +36,21 @@ export default function DrawerRoot() {
             drawerIcon: renderDrawerIcon('grid'),
             headerShown: false,
         }}/>
-        <Drawer.Screen name="notifications" options={{
-            title: 'Notifications',
-            drawerIcon: renderDrawerIcon('notifications-outline'),
+        <Drawer.Screen name="library" options={{
+            title: 'Career Archive',
+            drawerIcon: renderDrawerIcon('book-outline'),
+        }}/>
+        <Drawer.Screen name="learn" options={{
+            title: 'Career & Personality Videos',
+            drawerIcon: renderDrawerIcon('school-outline'),
+        }}/>
+        <Drawer.Screen name="entrance-exam" options={{
+            title: 'Entrance Exam',
+            drawerIcon: renderDrawerIcon('clipboard-outline'),
+        }}/>
+        <Drawer.Screen name="book-mentor" options={{
+            title: 'Book Your Mentor',
+            drawerIcon: renderDrawerIcon('people-outline'),
         }}/>
         <Drawer.Screen name="scholarship" options={{
             title: 'Scholarships',
@@ -48,29 +60,17 @@ export default function DrawerRoot() {
             title: 'Institutes',
             drawerIcon: renderDrawerIcon('business-outline'),
         }}/>
-        <Drawer.Screen name="entrance-exam" options={{
-            title: 'Entrance Exam',
-            drawerIcon: renderDrawerIcon('clipboard-outline'),
+        <Drawer.Screen name="newsletter" options={{
+            title: 'Career Insights',
+            drawerIcon: renderDrawerIcon('newspaper-outline'),
         }}/>
         <Drawer.Screen name="subscription" options={{
             title: 'Subscription',
             drawerIcon: renderDrawerIcon('card-outline'),
         }}/>
-        <Drawer.Screen name="library" options={{
-            title: 'Career Archive',
-            drawerIcon: renderDrawerIcon('book-outline'),
-        }}/>
-        <Drawer.Screen name="learn" options={{
-            title: 'Career & Personality Videos',
-            drawerIcon: renderDrawerIcon('school-outline'),
-        }}/>
-        <Drawer.Screen name="newsletter" options={{
-            title: 'Career Insights',
-            drawerIcon: renderDrawerIcon('newspaper-outline'),
-        }}/>
-         <Drawer.Screen name="book-mentor" options={{
-            title: 'Book Your Mentor',
-            drawerIcon: renderDrawerIcon('people-outline'),
+        <Drawer.Screen name="notifications" options={{
+            title: 'Notifications',
+            drawerIcon: renderDrawerIcon('notifications-outline'),
         }}/>
         <Drawer.Screen name="settings" options={{
             title: 'Settings',
