@@ -501,7 +501,7 @@ export default function CareerLibraryScreen() {
     const categoryRequestIdRef = useRef(0);
     const resolvedModuleId = useMemo(() => {
         const parsed = Number(params.moduleId);
-        return Number.isFinite(parsed) ? parsed : discoveredModuleId || 60;
+        return params.moduleId && Number.isFinite(parsed) ? parsed : discoveredModuleId;
     }, [discoveredModuleId, params.moduleId]);
     const instituteScope = useMemo(() => ({
         categoryId: selectedCategory?.id || selectedSecondCategory?.categoryId || selectedSubCategory?.categoryId || selectedDetailSource?.categoryId || '',
@@ -519,7 +519,18 @@ export default function CareerLibraryScreen() {
             });
             const id = Number(archive?.id);
             if (active && Number.isFinite(id)) setDiscoveredModuleId(id);
-        }).catch(() => {});
+            else if (active) {
+                setHasFullAccess(false);
+                setModuleStatus('locked');
+                setModuleAccessReady(true);
+            }
+        }).catch(() => {
+            if (active) {
+                setHasFullAccess(false);
+                setModuleStatus('locked');
+                setModuleAccessReady(true);
+            }
+        });
         return () => { active = false; };
     }, [params.moduleId]);
 
@@ -604,6 +615,10 @@ export default function CareerLibraryScreen() {
    useEffect(() => {
     let isMounted = true;
     const loadModuleAccess = async () => {
+        if (!Number.isFinite(resolvedModuleId)) {
+            setModuleAccessReady(false);
+            return;
+        }
         try {
             const response = await checkModuleAccess(resolvedModuleId);
             if (isMounted && response?.allowed) {

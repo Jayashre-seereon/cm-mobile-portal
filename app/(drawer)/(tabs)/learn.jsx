@@ -5,7 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
 import { useAppState } from '../../../src/app-state';
 import { palette } from '../../../src/careermap-data';
-import { checkModuleAccess } from '../../../src/api/moduleAccessApi';
+import { checkModuleAccess, getModules } from '../../../src/api/moduleAccessApi';
 import { getMasterClasses, startMasterClassPreview } from '../../../src/api/masterclassApi';
 import { AnimatedPressable, Pill, Screen, SectionHeader, UnlockBottomSheet, mobileAssistantScrollProps } from '../../../src/careermap-ui';
 import { openSubscriptionPrompt } from '../../../src/subscription-flow';
@@ -42,7 +42,7 @@ export default function LearnScreen() {
     const previewIntervalRef = useRef(null);
     const resolvedModuleId = useMemo(() => {
         const parsed = Number(params.moduleId);
-        return Number.isFinite(parsed) ? parsed : 60;
+        return params.moduleId && Number.isFinite(parsed) ? parsed : null;
     }, [params.moduleId]);
 
     const clearPreviewTimers = useCallback(() => {
@@ -123,7 +123,20 @@ export default function LearnScreen() {
         let isMounted = true;
         async function loadModuleAccess() {
             try {
-                const response = await checkModuleAccess(resolvedModuleId);
+                let moduleId = resolvedModuleId;
+                if (!Number.isFinite(moduleId)) {
+                    const modules = await getModules();
+                    const matched = modules.find((module) => {
+                        const title = String(module?.title || '').trim().toLowerCase();
+                        return title.includes('career & personality videos') || title.includes('masterclass');
+                    });
+                    moduleId = Number(matched?.id);
+                }
+                if (!Number.isFinite(moduleId)) {
+                    if (isMounted) setHasFullAccess(false);
+                    return;
+                }
+                const response = await checkModuleAccess(moduleId);
                 if (isMounted) {
                     setHasFullAccess(String(response?.mode || '').toLowerCase() === 'full' && response?.allowed !== false);
                 }
