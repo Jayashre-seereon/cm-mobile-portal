@@ -32,7 +32,7 @@ export default function DrawerRoot() {
         }}>
         <Drawer.Screen name="(tabs)" options={{
             title: 'CareerMap',
-            drawerLabel: 'Dashboard',
+            drawerLabel: 'Home',
             drawerIcon: renderDrawerIcon('grid'),
             headerShown: false,
         }}/>
@@ -40,8 +40,14 @@ export default function DrawerRoot() {
             title: 'Career Archive',
             drawerIcon: renderDrawerIcon('book-outline'),
         }}/>
+        <Drawer.Screen name="psychometric-test" options={{
+            title: 'Career Psychometric Assessment',
+            drawerLabel: 'Career Psychometric Assessment',
+            drawerIcon: renderDrawerIcon('analytics-outline'),
+        }}/>
         <Drawer.Screen name="learn" options={{
             title: 'Career & Personality Videos',
+            drawerLabel: 'Career & Personality Videos',
             drawerIcon: renderDrawerIcon('school-outline'),
         }}/>
         <Drawer.Screen name="entrance-exam" options={{
@@ -64,22 +70,33 @@ export default function DrawerRoot() {
             title: 'Career Insights',
             drawerIcon: renderDrawerIcon('newspaper-outline'),
         }}/>
+        <Drawer.Screen name="abroad" options={{
+            title: 'Study Abroad',
+            drawerIcon: renderDrawerIcon('globe-outline'),
+        }}/>
         <Drawer.Screen name="subscription" options={{
             title: 'Subscription',
             drawerIcon: renderDrawerIcon('card-outline'),
         }}/>
+        <Drawer.Screen name="quiz" options={{
+            title: 'Quiz',
+            drawerIcon: renderDrawerIcon('help-circle-outline'),
+        }}/>
         <Drawer.Screen name="notifications" options={{
             title: 'Notifications',
             drawerIcon: renderDrawerIcon('notifications-outline'),
+        }}/>
+        <Drawer.Screen name="profile-redirect" options={{
+            title: 'Profile',
+            drawerLabel: 'Profile',
+            drawerIcon: renderDrawerIcon('person-outline'),
+            headerShown: false,
         }}/>
         <Drawer.Screen name="settings" options={{
             title: 'Settings',
             drawerIcon: renderDrawerIcon('settings-outline'),
         }}/>
        
-        <Drawer.Screen name="psychometric-test" options={{
-            drawerItemStyle: { display: 'none' },
-        }}/>
         <Drawer.Screen name="assessment-preview" options={{
             drawerItemStyle: { display: 'none' },
         }}/>
@@ -92,12 +109,6 @@ export default function DrawerRoot() {
             headerShown: false,
         }}/>
         <Drawer.Screen name="entrance-exam-detail" options={{
-            drawerItemStyle: { display: 'none' },
-        }}/>
-        <Drawer.Screen name="quiz" options={{
-            drawerItemStyle: { display: 'none' },
-        }}/>
-        <Drawer.Screen name="abroad" options={{
             drawerItemStyle: { display: 'none' },
         }}/>
         <Drawer.Screen name="about" options={{
