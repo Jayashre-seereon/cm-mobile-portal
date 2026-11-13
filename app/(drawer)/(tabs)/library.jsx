@@ -218,7 +218,6 @@ function InstituteResultsSection({ title, scope, region, badge, emptyText, showL
                             {institution.admissionProcess ? <View className={`min-w-[45%] flex-1 rounded-[12px] px-3 py-2 ${darkMode ? 'bg-[#171313]' : 'bg-[#fff8f4]'}`}><Text className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#b8837e' }}>Admission Via</Text><Text className={`mt-1 text-[12px] font-semibold ${darkMode ? 'text-white' : 'text-ink'}`}>{institution.admissionProcess}</Text></View> : null}
                             {tentativeDate ? <View className={`min-w-[45%] flex-1 rounded-[12px] px-3 py-2 ${darkMode ? 'bg-[#111923]' : 'bg-[#f7fbff]'}`}><Text className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#6c88a8' }}>Tentative Date</Text><Text className={`mt-1 text-[12px] font-semibold ${darkMode ? 'text-white' : 'text-ink'}`}>{tentativeDate}</Text></View> : null}
                         </View> : null}
-                        {institution.url && institution.url !== '#' ? <Pressable onPress={() => Linking.openURL(institution.url).catch(() => {})} className={`flex-row items-center gap-2 border-t px-4 py-3 ${darkMode ? 'border-[#292329]' : 'border-[#f7eeec]'}`}><Text className="text-[13px] font-bold" style={{ color: palette.primary }}>Explore institution</Text><Ionicons name="arrow-forward" size={15} color={palette.primary}/></Pressable> : null}
                     </View>
                 );
             })}
