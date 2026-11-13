@@ -115,7 +115,10 @@ export async function getCareerLibraryInstitutions({
   if (state) params.append('state', state);
   if (type) params.append('type', type);
 
-  const response = await api.get(`/careerlibrary/institutions?${params.toString()}`);
+  // Use the canonical institutes route. It is mounted independently of the
+  // career-library router, so institute lists keep working across deployments
+  // where that optional router may not yet be present.
+  const response = await api.get(`/institutes/paginated?${params.toString()}`);
   const data = response?.data?.data;
   const items = Array.isArray(data)
     ? data
