@@ -205,10 +205,11 @@ export default function SubscriptionScreen() {
   : preferences.darkMode
       ? 'border-[#1a1a1a] bg-[#080808]'
       : 'border-line bg-card'}`}>
-            <View className="flex-row items-start justify-between gap-3 ">
+            <View className="gap-2">
+             <View className="flex-row items-start justify-between gap-3">
+               <Text className={`min-w-0 flex-1 text-[18px] font-black ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{plan.name}</Text>
+             </View>
              <View className="flex-1 gap-1.5">
-              
-                <Text className={`text-[18px] font-black ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{plan.name}</Text>
                   <View className="gap-1">
               <Text className="text-[28px] font-black text-brand">{plan.price}</Text>
               {plan.validity ? <Text className={`text-[12px] font-bold ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{plan.validity}/month</Text> : null}
@@ -237,12 +238,12 @@ export default function SubscriptionScreen() {
                 )}
               </View>
               
-              <View className="flex-row gap-2 ">
+            </View>
+              <View className="flex-row flex-wrap gap-2">
                 {plan.recommended ? <Pill label="Recommended" tone={palette.primary} /> : null}
                 {plan.highestseller ? <Pill label="Highest Seller" tone="#f59e0b" /> : null}
                 {statusLabel ? <Pill label={statusLabel} tone={statusTone} /> : null}
               </View>
-            </View>
           
             <View className="gap-2.5 ">
               {plan.features.map((feature) => (<View key={feature} className="flex-row items-center gap-2.5">
