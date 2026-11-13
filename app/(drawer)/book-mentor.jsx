@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import RenderHTML from 'react-native-render-html';
 import { useWindowDimensions } from 'react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -909,6 +909,10 @@ const filteredMentors = useMemo(() => {
         const experienceSuffix = experienceMatch?.[2] || 'yrs';
         return (<Screen animationKey={animationKey}>
             <SectionHeader title="Mentor Profile" subtitle="Profile, schedule selection, and booking flow aligned with the reference prototype." action={<Pressable className={`h-[38px] w-[38px] items-center justify-center rounded-[12px] ${preferences.darkMode ? 'bg-[#111111]' : 'bg-[#f2ebe6]'}`} onPress={() => {
+                if (params.fromGlobalSearch === '1' && router.canGoBack()) {
+                    router.back();
+                    return;
+                }
                 setSelectedMentorId(null);
                 setSelectedMentor(null);
                 setIsMentorLoading(false);

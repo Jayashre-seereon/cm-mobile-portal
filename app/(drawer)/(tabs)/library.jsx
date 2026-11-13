@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, ScrollView, Text, View ,Linking, useWindowDimensions} from 'react-native';
 import RenderHTML from 'react-native-render-html';import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1003,6 +1003,10 @@ export default function CareerLibraryScreen() {
         void openFromSearch();
     });
     const handleBack = () => {
+        if (params.fromGlobalSearch === '1' && router.canGoBack()) {
+            router.back();
+            return;
+        }
         if (currentLevel === 'details') {
             setCurrentLevel(detailReturnLevel);
         }
