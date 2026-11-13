@@ -40,6 +40,14 @@ const RESULT_GROUPS = [
 
 const EMPTY_DATA = { total: 0, results: [], grouped: {} };
 
+function normalizeSearchText(value = '') {
+    return String(value)
+        .normalize('NFKD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLocaleLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
 function getTypeConfig(item = {}) {
     const type = String(item.type || '').toLowerCase();
     const group = String(item.group || '').toLowerCase();
@@ -149,6 +157,28 @@ export function GlobalSearch({ visible, onClose }) {
                 } else {
                     const entityResults = Array.isArray(response.results) ? response.results : [];
                     const normalizedQuery = trimmed.toLowerCase().replace(/\s+/g, ' ');
+                    const normalizedInstituteQuery = normalizeSearchText(trimmed);
+                    const instituteResults = [
+                        ...(Array.isArray(response.grouped?.institutions) ? response.grouped.institutions : []),
+                        ...(Array.isArray(response.grouped?.colleges) ? response.grouped.colleges : []),
+                        ...entityResults.filter((item) =>
+                            ['institution', 'institute', 'institutes', 'college', 'colleges'].includes(String(item?.type || '').toLowerCase()) ||
+                            ['institutions', 'colleges'].includes(String(item?.group || '').toLowerCase())
+                        ),
+                    ];
+                    const normalizedInstitutes = [...new Map(instituteResults
+                        .map((item) => ({
+                            item,
+                            matches: normalizeSearchText(item?.title || item?.name || '').includes(normalizedInstituteQuery),
+                        }))
+                        .sort((a, b) => Number(b.matches) - Number(a.matches))
+                        .map(({ item }) => [String(item?.id ?? item?.navigation?.id ?? item?.title), item]))
+                        .values()];
+                    const instituteIds = new Set(instituteResults.map((item) => String(item?.id ?? item?.navigation?.id ?? item?.title)));
+                    const mergedEntityResults = [
+                        ...entityResults.filter((item) => !instituteIds.has(String(item?.id ?? item?.navigation?.id ?? item?.title))),
+                        ...normalizedInstitutes,
+                    ];
                     const moduleResults = moduleCards
                         .filter((module) => module.title.toLowerCase().includes(normalizedQuery))
                         .map((module) => ({
@@ -160,10 +190,11 @@ export function GlobalSearch({ visible, onClose }) {
                             badge: 'Module',
                             navigation: { path: module.route },
                         }));
-                    const results = [...moduleResults, ...entityResults];
+                    const results = [...moduleResults, ...mergedEntityResults];
                     const grouped = { ...(response.grouped || {}), modules: moduleResults };
+                    if (normalizedInstitutes.length) grouped.institutions = normalizedInstitutes;
                     setData({
-                        total: (typeof response.total === 'number' ? response.total : entityResults.length) + moduleResults.length,
+                        total: (typeof response.total === 'number' ? response.total : mergedEntityResults.length) + moduleResults.length,
                         results,
                         grouped,
                     });
@@ -244,7 +275,7 @@ export function GlobalSearch({ visible, onClose }) {
         }
         setOpeningKey(rowKey);
         try {
-            const result = await openTarget(resolveSearchTarget(item), { onLocked: setLockedInfo });
+            const result = await openTarget(resolveSearchTarget(item), { onLocked: setLockedInfo, fromGlobalSearch: true });
             if (result !== 'locked') {
                 onClose?.();
             }

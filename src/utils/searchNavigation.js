@@ -70,7 +70,7 @@ export function resolveSearchTarget(item) {
   const nav = item.navigation || {};
   const group = lower(item.group);
   const type = lower(item.type || nav.type);
-  const id = idString(item.id ?? nav.id);
+  const id = idString(item.id ?? nav.id ?? nav.instituteId ?? nav.examId ?? nav.scholarshipId ?? nav.countryId ?? nav.videoId ?? nav.quizId ?? nav.newsletterId ?? nav.mentorId);
   const title = String(item.title || '').trim();
   const rawUrl = String(nav.url || nav.path || item.route || '').trim();
 
@@ -108,23 +108,23 @@ export function resolveSearchTarget(item) {
   }
 
   // 2. Institutions / colleges
-  if (group === 'institutions' || group === 'colleges' || ['institution', 'institute', 'college'].includes(type)) {
-    return { pathname: ROUTES.institute, params: {} };
+  if (group === 'institutions' || group === 'colleges' || ['institution', 'institute', 'institutes', 'college', 'colleges'].includes(type)) {
+    return { pathname: ROUTES.institute, params: compactParams({ instituteId: id, search: title }) };
   }
 
   // 3. Entrance exams
-  if (group === 'entranceexams' || group === 'exams' || ['entranceexam', 'exam'].includes(type)) {
-    return { pathname: ROUTES.entranceExam, params: {} };
+  if (group === 'entranceexams' || group === 'exams' || ['entranceexam', 'entranceexams', 'exam', 'exams'].includes(type)) {
+    return { pathname: ROUTES.entranceExam, params: compactParams({ examId: id, search: title }) };
   }
 
   // 4. Mentors
-  if (group === 'mentors' || type === 'mentor') {
+  if (group === 'mentors' || ['mentor', 'mentors'].includes(type)) {
     return { pathname: ROUTES.mentor, params: compactParams({ mentorId: id, search: title }) };
   }
 
   // 5. Scholarships
-  if (group === 'scholarships' || type === 'scholarship') {
-    return { pathname: ROUTES.scholarship, params: {} };
+  if (group === 'scholarships' || ['scholarship', 'scholarships'].includes(type)) {
+    return { pathname: ROUTES.scholarship, params: compactParams({ scholarshipId: id, search: title }) };
   }
 
   // 6. Study abroad
@@ -133,18 +133,18 @@ export function resolveSearchTarget(item) {
   }
 
   // 7. Masterclasses -> Career & Personality Videos
-  if (group === 'masterclasses' || group === 'videos' || ['masterclass', 'video'].includes(type)) {
-    return { pathname: ROUTES.learn, params: {} };
+  if (group === 'masterclasses' || group === 'videos' || group === 'learn' || ['masterclass', 'masterclasses', 'learn', 'video', 'videos'].includes(type)) {
+    return { pathname: ROUTES.learn, params: compactParams({ videoId: id, search: title }) };
   }
 
   // 8. Quizzes
-  if (group === 'quizzes' || type === 'quiz') {
-    return { pathname: ROUTES.quiz, params: compactParams({ quizId: id }) };
+  if (group === 'quizzes' || ['quiz', 'quizzes'].includes(type)) {
+    return { pathname: ROUTES.quiz, params: compactParams({ quizId: id, search: title }) };
   }
 
   // 9. Newsletters -> Career Insights
-  if (group === 'newsletters' || type === 'newsletter') {
-    return { pathname: ROUTES.newsletter, params: compactParams({ newsletterId: id }) };
+  if (group === 'newsletters' || ['newsletter', 'newsletters'].includes(type)) {
+    return { pathname: ROUTES.newsletter, params: compactParams({ newsletterId: id, search: title }) };
   }
 
   // 10. Assessments
@@ -201,7 +201,7 @@ async function findModuleId(matchers) {
  * @param {{ onLocked?: (info: { title: string, message: string, returnTarget: object }) => void }} options
  * @returns {Promise<'external'|'opened'|'locked'>}
  */
-export async function openTarget(target, { onLocked } = {}) {
+export async function openTarget(target, { onLocked, fromGlobalSearch = false } = {}) {
   if (!target) {
     return 'opened';
   }
@@ -213,7 +213,11 @@ export async function openTarget(target, { onLocked } = {}) {
   const pathname = target.pathname || ROUTES.dashboard;
   const hasItem = Object.keys(target.params || {}).length > 0;
   // searchKey makes the target screen act on the item even when the same result is opened twice.
-  const params = { ...(target.params || {}), ...(hasItem ? { searchKey: String(Date.now()) } : {}) };
+  const params = {
+    ...(target.params || {}),
+    ...(hasItem ? { searchKey: String(Date.now()) } : {}),
+    ...(fromGlobalSearch ? { fromGlobalSearch: '1' } : {}),
+  };
   const gate = MODULE_GATES[pathname];
 
   if (!gate) {
