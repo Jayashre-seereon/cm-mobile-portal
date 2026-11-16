@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useAppState } from '../../src/app-state';
@@ -61,6 +61,12 @@ const INDIA_STATES = [
 ];
 
 const normalizeFilterValue = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+const getInstituteTypeLabel = (value) => {
+    const normalized = normalizeFilterValue(value);
+    if (['govt', 'gov', 'public'].includes(normalized)) return 'Government';
+    if (['pvt', 'private'].includes(normalized)) return 'Private';
+    return String(value || '');
+};
 
 const renderInstituteLogo = (item, size = 52) => {
     if (item?.logo) {
@@ -116,6 +122,12 @@ const [categorySearchQuery, setCategorySearchQuery] = useState('');
         const parsed = Number(params.moduleId);
         return Number.isFinite(parsed) ? parsed : null;
     }, [params.moduleId]);
+
+    const clearSearchFocus = () => {
+        setSearchInstitute(null);
+        const moduleParams = params.moduleId ? { moduleId: String(params.moduleId) } : {};
+        router.replace({ pathname: '/(drawer)/institute', params: moduleParams });
+    };
 
     useEffect(() => {
         let isMounted = true;
@@ -214,7 +226,12 @@ const [categorySearchQuery, setCategorySearchQuery] = useState('');
         return ['All', 'India', 'Other'];
     }, []);
     const typeOptions = useMemo(
-        () => ['All', ...Array.from(new Set(institutes.map((item) => item.type).filter(Boolean)))],
+        // Keep the common ownership types available even when the current API
+        // response is already filtered to one type (for example, Pvt only).
+        () => ['All', ...Array.from(new Map(
+            ['Govt', 'Pvt', ...institutes.map((item) => item.type).filter(Boolean)]
+                .map((value) => [normalizeFilterValue(value), value])
+        ).values())],
         [institutes]
     );
     const stateOptions = useMemo(() => {
@@ -246,7 +263,7 @@ const searchableTypeOptions = useMemo(() => {
     const query = typeSearchQuery.trim().toLowerCase();
     const source = typeOptions.filter((o) => o !== 'All');
     if (!query) return source;
-    return source.filter((o) => String(o).toLowerCase().includes(query));
+    return source.filter((o) => String(o).toLowerCase().includes(query) || getInstituteTypeLabel(o).toLowerCase().includes(query));
 }, [typeOptions, typeSearchQuery]);
 
 const searchableCountryOptions = useMemo(() => {
@@ -365,23 +382,25 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
             { key: 'type', label: 'All Types', value: typeFilter, show: showTypeDropdown, setShow: setShowTypeDropdown, query: typeSearchQuery, setQuery: setTypeSearchQuery, options: searchableTypeOptions, onSelect: (v) => { setTypeFilter(v); setTypeSearchQuery(''); setShowTypeDropdown(false); }, onClear: () => { setTypeFilter('All'); setTypeSearchQuery(''); setShowTypeDropdown(false); } },
         ].map(() => null)}
 
-        {/* Type */}
-        <View className="relative z-30">
+        {/* Category */}
+        <View className="relative z-10">
             <Pressable
-                onPress={() => setShowTypeDropdown((value) => !value)}
+                onPress={() => setShowCategoryDropdown((value) => !value)}
                 className={`flex-row items-center justify-between rounded-[14px] border px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`}
             >
                 <Text numberOfLines={1} className={`flex-1 text-[13px] font-semibold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>
-                    {typeFilter !== 'All' ? typeFilter : 'All Types'}
+                    {categoryFilter !== 'All'
+                        ? getOptionLabel(categoryOptions.find((opt) => getOptionValue(opt) === String(categoryFilter))) || 'All Domains'
+                        : 'All Domains'}
                 </Text>
-                <Ionicons name={showTypeDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={preferences.darkMode ? '#ffffff' : palette.text} />
+                <Ionicons name={showCategoryDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={preferences.darkMode ? '#ffffff' : palette.text} />
             </Pressable>
-            {showTypeDropdown ? (
+            {showCategoryDropdown ? (
                 <View className={`mt-2 max-h-[280px] rounded-[14px] border ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-white'}`}>
                     <View className="p-2">
                         <TextInput
-                            value={typeSearchQuery}
-                            onChangeText={setTypeSearchQuery}
+                            value={categorySearchQuery}
+                            onChangeText={setCategorySearchQuery}
                             placeholder="Type to search..."
                             placeholderTextColor={preferences.darkMode ? '#666666' : '#a89a94'}
                             autoFocus
@@ -389,19 +408,22 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                         />
                     </View>
                     <ScrollView className="max-h-[220px]" keyboardShouldPersistTaps="handled">
-                        {typeFilter !== 'All' ? (
-                            <Pressable onPress={() => { setTypeFilter('All'); setTypeSearchQuery(''); setShowTypeDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
-                                <Text className="text-[13px] font-bold text-brand">All Types</Text>
+                        {categoryFilter !== 'All' ? (
+                            <Pressable onPress={() => { clearSearchFocus(); setCategoryFilter('All'); setCategorySearchQuery(''); setShowCategoryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                                <Text className="text-[13px] font-bold text-brand">All Domains</Text>
                             </Pressable>
                         ) : null}
-                        {searchableTypeOptions.length === 0 ? (
-                            <Text className={`px-4 py-4 text-center text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No results found</Text>
+                        {searchableCategoryOptions.length === 0 ? (
+                            <Text className={`px-4 py-4 text-center text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No domains found</Text>
                         ) : (
-                            searchableTypeOptions.map((opt) => (
-                                <Pressable key={opt} onPress={() => { setTypeFilter(opt); setTypeSearchQuery(''); setShowTypeDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
-                                    <Text numberOfLines={1} className={`text-[13px] font-semibold ${opt === typeFilter ? 'text-brand' : preferences.darkMode ? 'text-white' : 'text-ink'}`}>{opt}</Text>
-                                </Pressable>
-                            ))
+                            searchableCategoryOptions.map((opt) => {
+                                const value = getOptionValue(opt);
+                                return (
+                                    <Pressable key={value} onPress={() => { clearSearchFocus(); setCategoryFilter(value); setCategorySearchQuery(''); setShowCategoryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                                        <Text numberOfLines={1} className={`text-[13px] font-semibold ${value === String(categoryFilter) ? 'text-brand' : preferences.darkMode ? 'text-white' : 'text-ink'}`}>{getOptionLabel(opt)}</Text>
+                                    </Pressable>
+                                );
+                            })
                         )}
                     </ScrollView>
                 </View>
@@ -432,7 +454,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                     </View>
                     <ScrollView className="max-h-[220px]" keyboardShouldPersistTaps="handled">
                         {countryFilter !== 'All' ? (
-                            <Pressable onPress={() => { setCountryFilter('All'); setCountrySearchQuery(''); setShowCountryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                            <Pressable onPress={() => { clearSearchFocus(); setCountryFilter('All'); setCountrySearchQuery(''); setShowCountryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
                                 <Text className="text-[13px] font-bold text-brand">All Countries</Text>
                             </Pressable>
                         ) : null}
@@ -440,7 +462,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                             <Text className={`px-4 py-4 text-center text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No results found</Text>
                         ) : (
                             searchableCountryOptions.map((opt) => (
-                                <Pressable key={opt} onPress={() => { setCountryFilter(opt); setCountrySearchQuery(''); setShowCountryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                                <Pressable key={opt} onPress={() => { clearSearchFocus(); setCountryFilter(opt); setCountrySearchQuery(''); setShowCountryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
                                     <Text numberOfLines={1} className={`text-[13px] font-semibold ${opt === countryFilter ? 'text-brand' : preferences.darkMode ? 'text-white' : 'text-ink'}`}>{opt}</Text>
                                 </Pressable>
                             ))
@@ -475,7 +497,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                     </View>
                     <ScrollView className="max-h-[220px]" keyboardShouldPersistTaps="handled">
                         {stateFilter !== 'All' ? (
-                            <Pressable onPress={() => { setStateFilter('All'); setStateSearchQuery(''); setShowStateDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                            <Pressable onPress={() => { clearSearchFocus(); setStateFilter('All'); setStateSearchQuery(''); setShowStateDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
                                 <Text className="text-[13px] font-bold text-brand">All States</Text>
                             </Pressable>
                         ) : null}
@@ -483,7 +505,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                             <Text className={`px-4 py-4 text-center text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No results found</Text>
                         ) : (
                             searchableStateOptions.map((opt) => (
-                                <Pressable key={opt} onPress={() => { setStateFilter(opt); setStateSearchQuery(''); setShowStateDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                                <Pressable key={opt} onPress={() => { clearSearchFocus(); setStateFilter(opt); setStateSearchQuery(''); setShowStateDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
                                     <Text numberOfLines={1} className={`text-[13px] font-semibold ${opt === stateFilter ? 'text-brand' : preferences.darkMode ? 'text-white' : 'text-ink'}`}>{opt}</Text>
                                 </Pressable>
                             ))
@@ -495,25 +517,23 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
 
        
 
-        {/* Category */}
-        <View className="relative z-10">
+        {/* Type */}
+        <View className="relative z-30">
             <Pressable
-                onPress={() => setShowCategoryDropdown((value) => !value)}
+                onPress={() => setShowTypeDropdown((value) => !value)}
                 className={`flex-row items-center justify-between rounded-[14px] border px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`}
             >
                 <Text numberOfLines={1} className={`flex-1 text-[13px] font-semibold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>
-                    {categoryFilter !== 'All'
-                        ? getOptionLabel(categoryOptions.find((opt) => getOptionValue(opt) === String(categoryFilter))) || 'All Categories'
-                        : 'All Categories'}
+                    {typeFilter !== 'All' ? getInstituteTypeLabel(typeFilter) : 'All Types'}
                 </Text>
-                <Ionicons name={showCategoryDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={preferences.darkMode ? '#ffffff' : palette.text} />
+                <Ionicons name={showTypeDropdown ? 'chevron-up' : 'chevron-down'} size={16} color={preferences.darkMode ? '#ffffff' : palette.text} />
             </Pressable>
-            {showCategoryDropdown ? (
+            {showTypeDropdown ? (
                 <View className={`mt-2 max-h-[280px] rounded-[14px] border ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-white'}`}>
                     <View className="p-2">
                         <TextInput
-                            value={categorySearchQuery}
-                            onChangeText={setCategorySearchQuery}
+                            value={typeSearchQuery}
+                            onChangeText={setTypeSearchQuery}
                             placeholder="Type to search..."
                             placeholderTextColor={preferences.darkMode ? '#666666' : '#a89a94'}
                             autoFocus
@@ -521,22 +541,19 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                         />
                     </View>
                     <ScrollView className="max-h-[220px]" keyboardShouldPersistTaps="handled">
-                        {categoryFilter !== 'All' ? (
-                            <Pressable onPress={() => { setCategoryFilter('All'); setCategorySearchQuery(''); setShowCategoryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
-                                <Text className="text-[13px] font-bold text-brand">All Categories</Text>
+                        {typeFilter !== 'All' ? (
+                            <Pressable onPress={() => { clearSearchFocus(); setTypeFilter('All'); setTypeSearchQuery(''); setShowTypeDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                                <Text className="text-[13px] font-bold text-brand">All Types</Text>
                             </Pressable>
                         ) : null}
-                        {searchableCategoryOptions.length === 0 ? (
-                            <Text className={`px-4 py-4 text-center text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No categories found</Text>
+                        {searchableTypeOptions.length === 0 ? (
+                            <Text className={`px-4 py-4 text-center text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No results found</Text>
                         ) : (
-                            searchableCategoryOptions.map((opt) => {
-                                const value = getOptionValue(opt);
-                                return (
-                                    <Pressable key={value} onPress={() => { setCategoryFilter(value); setCategorySearchQuery(''); setShowCategoryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
-                                        <Text numberOfLines={1} className={`text-[13px] font-semibold ${value === String(categoryFilter) ? 'text-brand' : preferences.darkMode ? 'text-white' : 'text-ink'}`}>{getOptionLabel(opt)}</Text>
-                                    </Pressable>
-                                );
-                            })
+                            searchableTypeOptions.map((opt) => (
+                                <Pressable key={opt} onPress={() => { clearSearchFocus(); setTypeFilter(opt); setTypeSearchQuery(''); setShowTypeDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                                    <Text numberOfLines={1} className={`text-[13px] font-semibold ${opt === typeFilter ? 'text-brand' : preferences.darkMode ? 'text-white' : 'text-ink'}`}>{getInstituteTypeLabel(opt)}</Text>
+                                </Pressable>
+                            ))
                         )}
                     </ScrollView>
                 </View>
@@ -546,6 +563,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
         {(typeFilter !== 'All' || stateFilter !== 'All' || countryFilter !== 'All' || categoryFilter !== 'All') ? (
             <Pressable
                 onPress={() => {
+                    clearSearchFocus();
                     setTypeFilter('All');
                     setStateFilter('All');
                     setCountryFilter('All');
