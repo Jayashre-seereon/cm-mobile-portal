@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Linking, Pressable, ScrollView, Text, View, TextInput, useWindowDimensions } from 'react-native';
 import RenderHTML from 'react-native-render-html';
@@ -399,6 +399,10 @@ if (typeFilter !== 'All') {
                         <AnimatedPressable
                             className={`h-[38px] w-[38px] items-center justify-center rounded-[12px] ${preferences.darkMode ? 'bg-[#111111]' : 'bg-[#f2ebe6]'}`}
                             onPress={() => {
+                                if (params.fromGlobalSearch === '1' && router.canGoBack()) {
+                                    router.back();
+                                    return;
+                                }
                                 resetToList();
                             }}
                         >

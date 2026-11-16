@@ -133,6 +133,13 @@ const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
         if (!examId || !entranceExams.some((exam) => String(exam.id) === examId)) {
             return;
         }
+        if (params.fromGlobalSearch === '1') {
+            router.replace({
+                pathname: '/(drawer)/entrance-exam-detail',
+                params: { examId, fromGlobalSearch: '1' },
+            });
+            return;
+        }
         setModeFilter('All');
         setCategoryFilter('All');
         const selected = entranceExams.find((exam) => String(exam.id) === examId);

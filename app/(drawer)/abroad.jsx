@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import TableRenderer, { tableModel } from '@native-html/table-plugin';
 import DateTimePicker from '@react-native-community/datetimepicker';
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions } from 'react-native';
 import RenderHTML from 'react-native-render-html';
@@ -738,6 +738,10 @@ const closeDatePicker = () => setDatePickerField(null);
         const country = selectedCountry;
         return (<Screen animationKey={animationKey}>
         <SectionHeader title={country.title}  action={<Pressable className={`h-[38px] w-[38px] items-center justify-center rounded-[12px] ${preferences.darkMode ? 'bg-[#111111]' : 'bg-[#f2ebe6]'}`} onPress={() => {
+                    if (params.fromGlobalSearch === '1' && router.canGoBack()) {
+                        router.back();
+                        return;
+                    }
                     setSelected(null);
                 }}>
               <Ionicons name="arrow-back" size={18} color={preferences.darkMode ? '#ffffff' : palette.text}/>

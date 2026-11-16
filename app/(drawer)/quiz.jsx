@@ -1,4 +1,4 @@
-import { useLocalSearchParams } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Alert, ActivityIndicator, Text, View } from 'react-native';
 import { useAppState } from '../../src/app-state';
@@ -136,6 +136,14 @@ export default function QuizScreen() {
     setIsSubmitting(false);
   }
 
+  function handleQuizBack() {
+    if (params.fromGlobalSearch === '1' && router.canGoBack()) {
+      router.back();
+      return;
+    }
+    resetQuizFlow();
+  }
+
   function handleSelectAnswer(optionId) {
     setAnswers((current) => {
       const next = [...current];
@@ -146,7 +154,7 @@ export default function QuizScreen() {
 
   function handlePreviousQuestion() {
     if (currentQuestion === 0) {
-      resetQuizFlow();
+      handleQuizBack();
       return;
     }
 
@@ -282,7 +290,7 @@ export default function QuizScreen() {
 
             <View className={`items-center gap-3 rounded-[26px] border p-[22px] ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`}>
               <Text className={`text-center text-[14px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{quizError}</Text>
-              <AnimatedPressable className="mt-1 rounded-[16px] bg-brand px-5 py-3.5" onPress={resetQuizFlow}>
+              <AnimatedPressable className="mt-1 rounded-[16px] bg-brand px-5 py-3.5" onPress={handleQuizBack}>
                 <Text className="text-[14px] font-extrabold text-white">Back to Quizzes</Text>
               </AnimatedPressable>
             </View>
