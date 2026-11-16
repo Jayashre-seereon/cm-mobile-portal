@@ -61,11 +61,14 @@ const INDIA_STATES = [
 ];
 
 const normalizeFilterValue = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
-const getInstituteTypeLabel = (value) => {
+const getInstituteOwnershipLabel = (value) => {
     const normalized = normalizeFilterValue(value);
-    if (['govt', 'gov', 'public'].includes(normalized)) return 'Government';
-    if (['pvt', 'private'].includes(normalized)) return 'Private';
-    return String(value || '');
+    if (/\b(government|govt|gov|public)\b/.test(normalized)) return 'Government';
+    if (/\b(private|pvt)\b/.test(normalized)) return 'Private';
+    return '';
+};
+const getInstituteTypeLabel = (value) => {
+    return getInstituteOwnershipLabel(value) || String(value || '');
 };
 
 const renderInstituteLogo = (item, size = 52) => {
@@ -596,6 +599,8 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
              {displayedInstitutes.map((item) => {
     const index = filtered.findIndex((entry) => String(entry.id) === String(item.id));
     const cardUnlocked = hasFullAccess || (index !== -1 && index < 4);
+    const ownershipLabel = getInstituteOwnershipLabel(item.type);
+    const isGovernment = ownershipLabel === 'Government';
     return (
     <AnimatedPressable 
         key={item.id} 
@@ -631,23 +636,32 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                 <Ionicons name={cardUnlocked ? 'lock-open' : 'lock-closed'} size={13} color={cardUnlocked ? palette.green : '#e53935'}/>
             </View>
             
-            <AnimatedPressable
-                onPress={(e) => {
-                    e.stopPropagation();
-                    if (!cardUnlocked) {
-                        setShowUnlockSheet(true);
-                        return;
-                    }
-                    if (item.website && item.website !== '#') {
-                        Linking.openURL(item.website);
-                    }
-                }}
-                className="px-3 py-1.5  mt-4"
-            >
-                <Text className="text-[10px] font-bold text-brand">
-                    Visit Website
-                </Text>
-            </AnimatedPressable>
+            <View className="items-end gap-1.5 mt-4">
+                {ownershipLabel ? (
+                    <View className="rounded-full px-2.5 py-1" style={{ backgroundColor: isGovernment ? '#eaf1ff' : '#fff0e6' }}>
+                        <Text className="text-[10px] font-extrabold uppercase" style={{ color: isGovernment ? '#3275d9' : '#d46b18' }}>
+                            {ownershipLabel}
+                        </Text>
+                    </View>
+                ) : null}
+                <AnimatedPressable
+                    onPress={(e) => {
+                        e.stopPropagation();
+                        if (!cardUnlocked) {
+                            setShowUnlockSheet(true);
+                            return;
+                        }
+                        if (item.website && item.website !== '#') {
+                            Linking.openURL(item.website);
+                        }
+                    }}
+                    className="px-3 py-1.5"
+                >
+                    <Text className="text-[10px] font-bold text-brand">
+                        Visit Website
+                    </Text>
+                </AnimatedPressable>
+            </View>
         </View>
 
     </AnimatedPressable>
