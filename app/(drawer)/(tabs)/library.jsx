@@ -67,6 +67,14 @@ const INDIA_STATE_OPTIONS = [
 ];
 const normalizeLocationFilter = (value) => String(value || '').trim().toLowerCase();
 
+function InstituteLogo({ uri, color }) {
+    const [failed, setFailed] = useState(false);
+    if (uri && !failed) {
+        return <Image source={{ uri }} style={{ width: '100%', height: '100%' }} resizeMode="contain" onError={() => setFailed(true)}/>;
+    }
+    return <Ionicons name="business-outline" size={22} color={color}/>;
+}
+
 function InstituteResultsSection({ title, scope, region, badge, emptyText, showLocationFilters = true }) {
     const { preferences } = useAppState();
     const darkMode = preferences.darkMode;
@@ -204,7 +212,7 @@ function InstituteResultsSection({ title, scope, region, badge, emptyText, showL
                         </View>
                         <View className="flex-row items-start gap-3 px-4 py-4">
                             <View className={`h-[56px] w-[56px] items-center justify-center overflow-hidden rounded-[16px] border ${darkMode ? 'border-[#292329] bg-[#111111]' : 'border-[#f0e4e2] bg-[#fffaf8]'}`}>
-                                {institution.logo ? <Image source={{ uri: institution.logo }} style={{ width: '100%', height: '100%' }} resizeMode="cover"/> : <Ionicons name="business-outline" size={22} color={palette.primary}/>}
+                                <InstituteLogo uri={institution.logo} color={palette.primary}/>
                             </View>
                             <View className="flex-1">
                                 <Text className={`text-[15px] font-black leading-5 ${darkMode ? 'text-white' : 'text-ink'}`}>{institution.name}</Text>
