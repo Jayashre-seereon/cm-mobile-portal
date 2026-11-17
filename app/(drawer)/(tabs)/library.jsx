@@ -1115,6 +1115,16 @@ export default function CareerLibraryScreen() {
     };
     const renderDetailItem = (detail, index) => {
         const title = getDetailTitle(detail);
+        const normalizeArchiveName = (value) => String(value || '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
+        const normalizedStreamName = normalizeArchiveName(selectedStream?.name);
+        const hideInstituteSections = normalizedStreamName === 'careerclusters' || (
+            normalizedStreamName === 'competitive' && [
+                'governmentjobsafter10th',
+                'governmentjobsafter12th',
+                'governmentjobsaftergraduation',
+                'governmentjobsafterpostgraduation',
+            ].includes(normalizeArchiveName(title))
+        );
         const salaryBullets = toList(detail?.salaryRanges).flatMap((salary) => getSalaryBullets(salary));
         const descriptions = toList(detail?.descriptions);
         const careerPaths = toList(detail?.careerpaths);
@@ -1337,21 +1347,21 @@ export default function CareerLibraryScreen() {
   </View>
 ) : null}
 
-<InstituteResultsSection
+{!hideInstituteSections ? <InstituteResultsSection
   title="Institutes outside Odisha"
   scope={instituteScope}
   region="outside"
   badge="Outside Odisha"
   emptyText="No institutes found outside Odisha."
-/>
-<InstituteResultsSection
+/> : null}
+{!hideInstituteSections ? <InstituteResultsSection
   title="Institutes in Odisha"
   scope={instituteScope}
   region="inside"
   badge="Odisha"
   emptyText="No Odisha institutes found for this selection."
   showLocationFilters={false}
-/>
+/> : null}
 
         
             
