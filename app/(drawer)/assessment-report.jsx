@@ -347,7 +347,7 @@ function TraitCardRow({ num, name, band, text, color = 'green' }) {
         borderWidth: 1,
         borderColor: badgeBg,
         overflow: 'hidden',
-        marginBottom: 9,
+        marginBottom: 15,
         backgroundColor: '#ffffff',
       }}
     >
@@ -380,10 +380,10 @@ function TraitCardRow({ num, name, band, text, color = 'green' }) {
               flexShrink: 1,
               textAlign: 'center',
               flexWrap: 'wrap',
-              lineHeight: 12.5,
+              lineHeight: 13,
               color: '#ffffff',
               fontFamily: 'Poppins_800ExtraBold', fontWeight: '800',
-              fontSize: 10.4,
+              fontSize: 10.9, // same size as every left-side card title
               textTransform: 'uppercase',
               letterSpacing: 0.3,
             }}
@@ -1232,7 +1232,7 @@ const totalH = 32 * (PAGE_H + PAGE_GAP);
 
   // Goal orientation: only the higher one
   const goalOrientationLabel = shortPct >= longPct ? 'SHORT TERM' : 'LONG TERM';
-  const goalOrientationSummary = shortPct >= longPct ? 'Short-Term Achiever' : 'Long-Term Visionary';
+  const goalOrientationSummary = shortPct >= longPct ? 'Short-Term' : 'Long-Term';
 const bandLabelFor = (arr, facet, fallback = 'Moderate') => {
   const found = (arr || []).find((x) => x.facet === facet);
   return (found?.bandLabel || fallback).toUpperCase();
@@ -2072,10 +2072,6 @@ useEffect(() => {
             Conventional—each reflecting different strengths and preferences. Most individuals show a combination of
             these. Understanding your interest profile helps you explore careers that align with what inspires you, making
             work more enjoyable, learning more natural, and success more fulfilling.
-          </Text>
-
-          <Text style={{ textAlign: 'center', fontFamily: 'Poppins_800ExtraBold', fontWeight: '800', fontSize: 15, color: COLORS.dark, marginBottom: 6 }}>
-            RIASEC Model
           </Text>
 
           <View style={{ alignItems: 'center', justifyContent: 'center', marginVertical: 10 }}>
@@ -2964,14 +2960,15 @@ useEffect(() => {
             come more easily.
           </Text>
           <Text style={{ fontFamily: 'Poppins_700Bold', fontWeight: '700', fontSize: 13.2, color: COLORS.dark, marginBottom: 8 }}>
-            In this test, we assess six types of aptitudes:
+            In this section, six types of aptitudes are assessed.
           </Text>
 
-          <View style={{ alignItems: 'center', justifyContent: 'center', alignSelf: 'center', width: '100%', maxWidth: 540, marginVertical: 6, height: 360, overflow: 'hidden' }}>
+          {/* report_6.png is mostly blank above/below the cards: show only the cards band */}
+          <View style={{ alignSelf: 'center', width: '100%', aspectRatio: 1536 / 360, marginVertical: 6, overflow: 'hidden' }}>
             <Image
               source={ReportImg6}
               style={{ width: '100%', height: '100%' }}
-              resizeMode="contain"
+              resizeMode="cover"
             />
           </View>
 
