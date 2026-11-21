@@ -1,16 +1,12 @@
 import React from 'react';
 import { StyleSheet, Text as NativeText, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 
-const Text = ({ style, ...props }) => {
-  const resolvedStyle = StyleSheet.flatten(style) || {};
-  const size = Number(resolvedStyle.fontSize);
-  const scale = size > 0 ? (size <= 11 ? 1.1 : size <= 14 ? 1.2 : size <= 18 ? 1.08 : 1) : 1;
-  const scaledTypography = size > 0
-    ? { fontSize: size * scale, ...(resolvedStyle.lineHeight ? { lineHeight: resolvedStyle.lineHeight * scale } : {}) }
-    : {};
-  return <NativeText {...props} style={[{ fontFamily: 'Poppins_400Regular' }, resolvedStyle, scaledTypography]} />;
-};
+// Page 3 is drawn on the fixed 794px A4 canvas, so web px are used 1:1 (no font enlargement here).
+const Text = ({ style, ...props }) => (
+  <NativeText {...props} style={[{ fontFamily: 'Poppins_400Regular' }, StyleSheet.flatten(style) || {}]} />
+);
 
 /**
  * 5 Standard Planning Stages definition
@@ -201,437 +197,439 @@ export default function YourProfilingReport({
     >
       {PageHeader && <PageHeader studentFirstName={studentFirstName} />}
 
-      {/* BLOCK 1: Title Pill & Intro */}
-      {TitlePill ? (
-        <TitlePill title={heading} colorClass="red" />
-      ) : (
-        <View style={styles.titlePillHeader}>
-          <Text style={styles.titlePillText}>{heading}</Text>
-        </View>
-      )}
-
-     {introParagraph.split('\n\n').map((p, i) => (
-  <Text key={i} style={styles.introParagraph}>{p}</Text>
-))}
-      {/* BLOCK 2 & 3 & 6: STAGE TRACK + RISK BADGE + CRI SCORE */}
-      <View style={styles.stageTrackCard}>
-        {/* Top summary row: stage track title, risk badge, CRI */}
-        <View style={styles.stageTrackTopRow}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
-            <View style={styles.lightningIconContainer}>
-              <Ionicons name="flash" size={13} color="#ffffff" />
+      {/* web: .pdf-page-body.profiling-report-body (flex 0 0 auto, py-1, space-y-2) */}
+      <View style={styles.body}>
+        {/* BLOCK 1: HEADER BLOCK */}
+        <View>
+          {TitlePill ? (
+            <TitlePill title={heading} />
+          ) : (
+            <View style={styles.titlePillHeader}>
+              <Text style={styles.titlePillText}>{heading}</Text>
             </View>
-            <Text style={styles.stageTrackTitle} numberOfLines={1}>
-              {stageTrack.title || 'Current Stage of Planning'}
-            </Text>
-          </View>
+          )}
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            {/* BLOCK 3: Risk Level Badge */}
-            <View
-              style={[
-                styles.riskBadge,
-                { backgroundColor: `${riskStyle.pillBg}15`, borderColor: `${riskStyle.pillBg}55` },
-              ]}
-            >
-              <View style={[styles.riskDot, { backgroundColor: riskStyle.pillBg }]} />
-              <Text style={[styles.riskText, { color: riskStyle.pillBg }]}>
-                {riskBadge.text || `Risk level: ${riskStyle.label}`}
-              </Text>
-            </View>
-
-            {/* BLOCK 6: Career Readiness Score */}
-            <View style={styles.criBadge}>
-              <Ionicons name="trophy" size={12} color="#fbbf24" />
-              <Text style={styles.criBadgeText}>
-                CRI: <Text style={{ color: '#fef08a', fontWeight: '900' }}>{criScore}</Text>/{criMaxScore}
-              </Text>
-            </View>
-          </View>
+          <Text style={styles.introParagraph}>{introParagraph}</Text>
         </View>
 
-        {/* 5-Step Horizontal Track */}
-        <View style={styles.stageTrackContainer}>
-          {/* Connector Line Background */}
-          <View style={styles.trackLineBg} />
-          {/* Filled Connector Line */}
-          <View
-            style={[
-              styles.trackLineFill,
-              {
-                width: `${Math.max(0, Math.min(100, ((currentStageNo - 1) / 4) * 100))}%`,
-              },
-            ]}
-          />
+        {/* BLOCK 2 & 3 & 6: STAGE TRACK + RISK BADGE + CRI SCORE */}
+        <LinearGradient
+          colors={['#FAFCFD', '#F4F7FA']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.stageTrackCard}
+        >
+          {/* Top Row: Track Title & Badges */}
+          <View style={styles.stageTrackTopRow}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={styles.lightningIconContainer}>
+                <Ionicons name="flash" size={12} color="#ffffff" />
+              </View>
+              <Text style={styles.sectionTitle}>Your Current Career Stage</Text>
+            </View>
 
-          {stages.map((stage, sIdx) => {
-            const stepNo = stage.stageNo || sIdx + 1;
-            const isCurrent =
-              stage.isCurrent ||
-              stepNo === currentStageNo ||
-              stage.stageCode === stageTrack.currentStageCode;
-            const isPast = stepNo < currentStageNo;
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              {/* BLOCK 3: Risk Level Badge */}
+              <View
+                style={[
+                  styles.pill,
+                  { borderWidth: 1, backgroundColor: `${riskStyle.pillBg}18`, borderColor: `${riskStyle.pillBg}55` },
+                ]}
+              >
+                <View style={[styles.riskDot, { backgroundColor: riskStyle.pillBg }]} />
+                <Text style={[styles.pillText, { color: riskStyle.pillBg }]}>
+                  {riskBadge.text || `Risk level: ${riskStyle.label}`}
+                </Text>
+              </View>
 
-            return (
-              <View key={stage.stageCode || sIdx} style={styles.stageNodeWrapper}>
-                {/* Node Circle */}
-                <View
-                  style={[
-                    styles.stageCircle,
-                    isCurrent
-                      ? styles.stageCircleCurrent
-                      : isPast
-                      ? styles.stageCirclePast
-                      : styles.stageCircleFuture,
-                  ]}
-                >
-                  {isPast ? (
-                    <Ionicons name="checkmark" size={12} color="#ffffff" />
-                  ) : (
+              {/* BLOCK 6: Career Readiness Score Mini Badge */}
+              <View style={[styles.pill, { backgroundColor: '#1E232A' }]}>
+                <Ionicons name="trophy" size={12} color="#fbbf24" />
+                <Text style={[styles.pillText, { color: '#ffffff' }]}>
+                  Career Readiness:{' '}
+                  <Text style={{ color: '#fcd34d', fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>{criScore}</Text>
+                  /{criMaxScore}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Visual 5-Step Horizontal Track */}
+          <View style={{ paddingTop: 12, paddingBottom: 4 }}>
+            <View style={styles.stageTrackContainer}>
+              {/* Connected background track line */}
+              <View style={styles.trackLineBg} />
+              {/* Filled active track line */}
+              <LinearGradient
+                colors={['#0d9488', '#8C1814']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 0 }}
+                style={[
+                  styles.trackLineFill,
+                  {
+                    width: `${Math.max(0, Math.min(100, ((currentStageNo - 1) / 4) * 100))}%`,
+                  },
+                ]}
+              />
+
+              {stages.map((stage, sIdx) => {
+                const stepNo = stage.stageNo || sIdx + 1;
+                const isCurrent =
+                  stage.isCurrent ||
+                  stepNo === currentStageNo ||
+                  stage.stageCode === stageTrack.currentStageCode;
+                const isPast = stepNo < currentStageNo;
+
+                return (
+                  <View key={stage.stageCode || sIdx} style={styles.stageNodeWrapper}>
+                    {/* Circle Node (current: ring-4 ring-[#8C1814]/20, shadow-md, scale-110) */}
+                    <View style={[styles.stageCircleBox, isCurrent && styles.stageCircleBoxCurrent]}>
+                      {isCurrent && <View style={styles.stageCircleRing} />}
+                      <View
+                        style={[
+                          styles.stageCircle,
+                          isCurrent
+                            ? styles.stageCircleCurrent
+                            : isPast
+                            ? styles.stageCirclePast
+                            : styles.stageCircleFuture,
+                        ]}
+                      >
+                        {isPast ? (
+                          <Ionicons name="checkmark" size={10} color="#ffffff" />
+                        ) : (
+                          <Text
+                            style={[
+                              styles.stageCircleText,
+                              isCurrent ? { color: '#ffffff' } : { color: '#94a3b8' },
+                            ]}
+                          >
+                            {stepNo}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+
+                    {/* Stage Name */}
                     <Text
                       style={[
-                        styles.stageCircleText,
+                        styles.stageNodeName,
                         isCurrent
-                          ? { color: '#ffffff' }
+                          ? styles.stageNodeNameCurrent
                           : isPast
-                          ? { color: '#ffffff' }
-                          : { color: '#94a3b8' },
+                          ? styles.stageNodeNamePast
+                          : styles.stageNodeNameFuture,
                       ]}
                     >
-                      {stepNo}
+                      {stage.stageName}
                     </Text>
-                  )}
-                </View>
 
-                {/* Stage Name */}
-                <Text
-                  style={[
-                    styles.stageNodeName,
-                    isCurrent
-                      ? styles.stageNodeNameCurrent
-                      : isPast
-                      ? styles.stageNodeNamePast
-                      : styles.stageNodeNameFuture,
-                  ]}
-                  numberOfLines={2}
-                >
-                  {stage.stageName}
-                </Text>
-
-                {/* 'You are here' indicator */}
-                {isCurrent && (
-                  <View style={styles.youAreHereBadge}>
-                    <Text style={styles.youAreHereText}>You are here</Text>
+                    {/* Current Stage Indicator Tag */}
+                    {isCurrent && (
+                      <View style={styles.youAreHereBadge}>
+                        <Text style={styles.youAreHereText}>You are here</Text>
+                      </View>
+                    )}
                   </View>
-                )}
-              </View>
-            );
-          })}
-        </View>
-
-        <View style={styles.stageDescriptions}>
-          {stages.map((stage) => (
-            <View key={`${stage.stageNo}-description`} style={styles.stageDescriptionItem}>
-              <Text style={styles.stageDescriptionTitle}>{stage.stageNo}. {stage.stageName}</Text>
-              <Text style={styles.stageDescriptionText}>{stage.description}</Text>
+                );
+              })}
             </View>
-          ))}
-        </View>
-      </View>
-
-      {/* BLOCK 4: WHAT IT MEANS */}
-      <View style={styles.whatItMeansCard}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-          <Text style={{ fontSize: 15 }}>💡</Text>
-          <Text style={styles.whatItMeansTitle}>What it means</Text>
-        </View>
-        <Text style={styles.whatItMeansBody}>{whatItMeans}</Text>
-        <View style={styles.whatItMeansFooter}>
-          <Text style={styles.whatItMeansFooterText}>
-            Current Status: <Text style={{ color: '#8C1814', fontWeight: '800' }}>{currentStageName}</Text>
-          </Text>
-          <Text style={styles.whatItMeansFooterText}>
-            Career Readiness: <Text style={{ color: '#1e293b', fontWeight: '800' }}>{criScore}/100</Text>
-          </Text>
-        </View>
-      </View>
-
-      {/* BLOCK 5: YOUR 5 AREAS */}
-      <View style={{ marginTop: 10 }}>
-        <View style={styles.fiveAreasHeaderRow}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-            <Text style={{ fontSize: 15 }}>📊</Text>
-            <Text style={styles.fiveAreasTitle}>Your 5 Areas of Personal Profiling</Text>
           </View>
-          <Text style={styles.fiveAreasLegend}>Stages: 1 to 5</Text>
-        </View>
 
-        <View style={{ gap: 3 }}>
-          {your5Areas.map((area, idx) => {
-            const code = area.domainCode || Object.keys(DOMAIN_CONFIG)[idx] || 'SA';
-            const cfg = DOMAIN_CONFIG[code] || DOMAIN_CONFIG.SA;
-            const domainName = area.domainStudentFacingName || cfg.defaultName;
-            const stageNum = Number(area.stageNo || 3);
-            const stageLabel = area.stage || area.label || 'Exploring';
-            const scoreVal = area.score !== undefined ? area.score : null;
-
-            return (
-              <View key={code || idx} style={styles.areaCard}>
-                {/* Top Row: Icon + Name + Stage Badge + 5-Mini-Bar + Score */}
-                <View style={styles.areaTopRow}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1 }}>
-                    <Text style={{ fontSize: 15 }}>{cfg.icon}</Text>
-                    <Text style={styles.areaName} numberOfLines={1}>{domainName}</Text>
-                   
-                  </View>
-
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    {/* 5-Step Mini Bar */}
-                    <View style={styles.miniBarContainer}>
-                      {[1, 2, 3, 4, 5].map((stg) => {
-                        const isFilled = stg <= stageNum;
-                        return (
-                          <View
-                            key={stg}
-                            style={[
-                              styles.miniBarSegment,
-                              {
-                                backgroundColor: isFilled ? cfg.color : '#e2e8f0',
-                                opacity: isFilled ? 1 : 0.5,
-                              },
-                            ]}
-                          />
-                        );
-                      })}
-                    </View>
-                    <Text style={styles.miniBarLabel}>{stageNum}/5</Text>
-
-                  
-                  </View>
-                </View>
-
-                {/* Bottom Row: Meaning text */}
-                <Text style={styles.areaMeaningText}>{area.meaning}</Text>
-              </View>
-            );
-          })}
-        </View>
-      </View>
-
-      {/* BLOCK 7: NOTES FOR YOU (If present) */}
-      {hasNotes && (
-        <View style={styles.notesCard}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-            <Ionicons name="warning" size={14} color="#d97706" />
-            <Text style={styles.notesTitle}>Personalized Guidance & Key Observations</Text>
-          </View>
-          <View style={{ gap: 4 }}>
-            {notesList.map((n, i) => (
-              <View key={n.flagId || i} style={styles.noteItem}>
-           {!!n.flagName && (
-                  <View style={styles.flagNameBadge}>
-                    <Text style={styles.flagNameBadgeText}>{n.flagName}</Text>
-                  </View>
-                )}
-                <Text style={styles.noteText}>{n.text || n.message}</Text>
+          <View style={styles.stageDescriptions}>
+            {stages.map((stage) => (
+              <View key={`${stage.stageNo}-description`} style={styles.stageDescriptionItem}>
+                <Text style={styles.stageDescriptionTitle}>{stage.stageNo}. {stage.stageName}</Text>
+                <Text style={styles.stageDescriptionText}>{stage.description}</Text>
               </View>
             ))}
           </View>
+        </LinearGradient>
+
+        {/* BLOCK 4: WHAT IT MEANS */}
+        <View style={styles.whatItMeansCard}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+            <Text style={[styles.sectionTitle, { color: '#8C1814' }]}>💡</Text>
+            <Text style={[styles.sectionTitle, { color: '#8C1814' }]}>What it means</Text>
+          </View>
+          <Text style={styles.whatItMeansBody}>{whatItMeans}</Text>
+          <View style={styles.whatItMeansFooter}>
+            <Text style={styles.whatItMeansFooterText}>
+              Current Status:{' '}
+              <Text style={{ color: '#8C1814', fontFamily: 'Poppins_700Bold', fontWeight: '700' }}>{currentStageName}</Text>
+            </Text>
+            <Text style={styles.whatItMeansFooterText}>
+              CRI:{' '}
+              <Text style={{ color: '#1e293b', fontFamily: 'Poppins_700Bold', fontWeight: '700' }}>{criScore}/100</Text>
+            </Text>
+          </View>
+        </View>
+
+        {/* BLOCK 5: YOUR 5 AREAS */}
+        <View>
+          <View style={styles.fiveAreasHeaderRow}>
+            <Text style={styles.sectionTitle}>📊</Text>
+            <Text style={styles.sectionTitle}>Your 5 Areas of Personal Profiling</Text>
+          </View>
+
+          <View style={{ gap: 2.4 }}>
+            {your5Areas.map((area, idx) => {
+              const code = area.domainCode || Object.keys(DOMAIN_CONFIG)[idx] || 'SA';
+              const cfg = DOMAIN_CONFIG[code] || DOMAIN_CONFIG.SA;
+              const domainName = area.domainStudentFacingName || cfg.defaultName;
+              const stageNum = Number(area.stageNo || 3);
+              const stageLabel = area.stage || area.label || 'Exploring';
+              const scoreVal = area.score !== undefined ? area.score : null;
+
+              return (
+                <View key={code || idx} style={styles.areaCard}>
+                  {/* Top Row: Icon + Name + 5-Step Mini Bar */}
+                  <View style={styles.areaTopRow}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 210 }}>
+                      <Text style={{ fontSize: 14, lineHeight: 20, color: '#374151' }}>{cfg.icon}</Text>
+                      <Text style={styles.areaName}>{domainName}</Text>
+                    </View>
+
+                    {/* 5-Step Mini-Progress Bar (1 to 5) */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, maxWidth: 220 }}>
+                      <View style={styles.miniBarContainer}>
+                        {[1, 2, 3, 4, 5].map((stg) => {
+                          const isFilled = stg <= stageNum;
+                          return (
+                            <View
+                              key={stg}
+                              style={[
+                                styles.miniBarSegment,
+                                {
+                                  backgroundColor: isFilled ? cfg.color : '#E2E8F0',
+                                  opacity: isFilled ? 1 : 0.6,
+                                },
+                              ]}
+                            />
+                          );
+                        })}
+                      </View>
+                      <Text style={styles.miniBarLabel}>{stageNum}/5</Text>
+                    </View>
+                  </View>
+
+                  {/* Bottom Row: Meaning text */}
+                  <Text style={styles.areaMeaningText}>{area.meaning}</Text>
+                </View>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* BLOCK 7: NOTES FOR YOU (FLAGS / GUIDANCE) */}
+        {hasNotes && (
+          <View style={styles.notesCard}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <Ionicons name="warning" size={14} color="#d97706" />
+              <Text style={[styles.sectionTitle, { color: '#78350f' }]}>Personalized Guidance & Key Observations</Text>
+            </View>
+            <View style={{ gap: 4 }}>
+              {notesList.map((n, i) => (
+                <Text key={n.flagId || i} style={styles.noteText}>
+                  {!!n.flagName && (
+                    <Text style={styles.flagNameBadgeText}>{` ${n.flagName} `}</Text>
+                  )}
+                  {!!n.flagName && '  '}
+                  {n.text || n.message}
+                </Text>
+              ))}
+            </View>
+          </View>
+        )}
+      </View>
+
+      {/* web: .profiling-report-page .pdf-footer { margin-top: 12px } — footer sits right after the content */}
+      {PageFooter && (
+        <View style={{ marginTop: 12, width: '100%', flexShrink: 0 }}>
+          <PageFooter pageNum={pageNum} />
         </View>
       )}
-
-      {PageFooter && <PageFooter pageNum={pageNum} />}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  body: {
+    flexDirection: 'column',
+    justifyContent: 'flex-start',
+    width: '100%',
+    paddingVertical: 4,
+    gap: 8,
+  },
   titlePillHeader: {
-    backgroundColor: '#fbebe9',
-    borderColor: '#8C1814',
-    borderWidth: 1.5,
-    borderRadius: 999,
-    paddingVertical: 5,
-    paddingHorizontal: 12,
+    backgroundColor: '#5B7692',
+    borderRadius: 9999,
+    paddingTop: 5,
+    paddingBottom: 5,
+    paddingLeft: 7,
+    paddingRight: 24,
     alignSelf: 'flex-start',
-    marginBottom: 6,
+    marginBottom: 18,
   },
   titlePillText: {
-    color: '#8C1814',
-    fontSize: 13.8,
+    color: '#ffffff',
+    fontSize: 17.6,
+    lineHeight: 26.4,
     fontFamily: 'Poppins_800ExtraBold',
     fontWeight: '800',
-    letterSpacing: 0.5,
+    letterSpacing: 0.88,
+    textTransform: 'uppercase',
   },
+  // web: p.page-lead-text !mb-1 whitespace-pre-line text-sm leading-[1.5] text-[#374151]
   introParagraph: {
-    fontSize: 10.8,
+    fontSize: 14,
+    lineHeight: 21,
     color: '#374151',
-    lineHeight: 16.25,
-    fontFamily: 'Poppins_500Medium',
-    fontWeight: '500',
+    fontFamily: 'Poppins_400Regular',
+    fontWeight: '400',
     marginBottom: 4,
     textAlign: 'justify',
   },
+  // web: .profiling-stage-card rounded-xl border border-[#E5E7EB] gradient, padding 6px
   stageTrackCard: {
-    backgroundColor: '#fafbfc',
-    borderColor: '#e5e7eb',
+    borderColor: '#E5E7EB',
     borderWidth: 1,
-    borderRadius: 14,
-    padding: 8,
-    marginBottom: 6,
+    borderRadius: 12,
+    padding: 6,
   },
   stageTrackTopRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 8,
     paddingBottom: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#f1f5f9',
-    gap: 8,
+    borderBottomColor: '#E5E7EB',
   },
   lightningIconContainer: {
     backgroundColor: '#8C1814',
-    width: 20,
-    height: 20,
-    borderRadius: 6,
+    width: 24,
+    height: 24,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  stageTrackTitle: {
-    fontSize: 12.6,
-    fontFamily: 'Poppins_800ExtraBold',
-    fontWeight: '800',
-    color: '#1e293b',
+  // web: text-xs font-black uppercase tracking-wider text-[#1E232A]
+  sectionTitle: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: 'Poppins_900Black',
+    fontWeight: '900',
+    color: '#1E232A',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0.6,
   },
-  riskBadge: {
+  // web: inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold
+  pill: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
-    paddingHorizontal: 7,
+    gap: 6,
+    paddingHorizontal: 10,
     paddingVertical: 2,
-    borderRadius: 999,
-    borderWidth: 1,
+    borderRadius: 9999,
   },
   riskDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
-  riskText: {
-    fontSize: 10.9,
-    fontFamily: 'Poppins_700Bold',
-    fontWeight: '700',
-  },
-  criBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: '#1e293b',
-    paddingHorizontal: 8,
-    paddingVertical: 2.5,
-    borderRadius: 999,
-  },
-  criBadgeText: {
-    color: '#ffffff',
-    fontSize: 10.9,
+  pillText: {
+    fontSize: 11,
+    lineHeight: 16.5,
     fontFamily: 'Poppins_700Bold',
     fontWeight: '700',
   },
   stageTrackContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     justifyContent: 'space-between',
     position: 'relative',
-    paddingTop: 12,
-    paddingBottom: 4,
   },
-  stageDescriptions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    borderTopWidth: 1,
-    borderTopColor: '#e5e7eb',
-    marginTop: 7,
-    paddingTop: 6,
-    rowGap: 5,
-  },
-  stageDescriptionItem: {
-    width: '48.5%',
-  },
-  stageDescriptionTitle: {
-    color: '#1e232a',
-    fontSize: 8.5,
-    lineHeight: 10,
-    fontFamily: 'Poppins_700Bold',
-    fontWeight: '700',
-  },
-  stageDescriptionText: {
-    color: '#64748b',
-    fontSize: 7.2,
-    lineHeight: 8.6,
-    fontFamily: 'Poppins_400Regular',
-  },
+  // web: absolute top-3.5 left-4 right-4 h-1 bg-[#E2E8F0] rounded-full
   trackLineBg: {
     position: 'absolute',
-    top: 22,
-    left: 20,
-    right: 20,
-    height: 3,
-    backgroundColor: '#e2e8f0',
-    borderRadius: 2,
+    top: 14,
+    left: 16,
+    right: 16,
+    height: 4,
+    backgroundColor: '#E2E8F0',
+    borderRadius: 9999,
     zIndex: 0,
   },
   trackLineFill: {
     position: 'absolute',
-    top: 22,
-    left: 20,
-    height: 3,
-    backgroundColor: '#0d9488',
-    borderRadius: 2,
-    zIndex: 1,
+    top: 14,
+    left: 16,
+    height: 4,
+    borderRadius: 9999,
+    zIndex: 0,
   },
   stageNodeWrapper: {
-    width: '19%',
+    width: '18%',
     alignItems: 'center',
-    zIndex: 2,
+    zIndex: 10,
+  },
+  stageCircleBox: {
+    width: 28,
+    height: 28,
+  },
+  stageCircleBoxCurrent: {
+    transform: [{ scale: 1.1 }],
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+  },
+  stageCircleRing: {
+    position: 'absolute',
+    top: -4,
+    left: -4,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(140, 24, 20, 0.2)',
   },
   stageCircle: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
   },
   stageCircleCurrent: {
     backgroundColor: '#8C1814',
-    borderWidth: 2,
-    borderColor: '#fca5a5',
   },
   stageCirclePast: {
     backgroundColor: '#0d9488',
   },
   stageCircleFuture: {
     backgroundColor: '#ffffff',
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: '#cbd5e1',
   },
   stageCircleText: {
-    fontSize: 11.5,
-    fontFamily: 'Poppins_800ExtraBold',
-    fontWeight: '800',
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: 'Poppins_900Black',
+    fontWeight: '900',
   },
+  // web: mt-1 text-[11px] leading-tight
   stageNodeName: {
-    fontSize: 10.4,
+    fontSize: 11,
+    lineHeight: 13.75,
     marginTop: 4,
     textAlign: 'center',
-    lineHeight: 12.6,
   },
   stageNodeNameCurrent: {
     color: '#8C1814',
-    fontFamily: 'Poppins_800ExtraBold',
-    fontWeight: '800',
+    fontFamily: 'Poppins_900Black',
+    fontWeight: '900',
   },
   stageNodeNamePast: {
     color: '#1e293b',
@@ -639,198 +637,174 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   stageNodeNameFuture: {
-    color: '#64748b',
-    fontFamily: 'Poppins_500Medium',
-    fontWeight: '500',
+    color: '#334155',
+    fontFamily: 'Poppins_600SemiBold',
+    fontWeight: '600',
   },
+  // web: mt-0.5 rounded bg-[#8C1814] px-1.5 text-[9px] font-extrabold uppercase tracking-wider text-white
   youAreHereBadge: {
     backgroundColor: '#8C1814',
     borderRadius: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
+    paddingHorizontal: 6,
     marginTop: 2,
   },
   youAreHereText: {
     color: '#ffffff',
-    fontSize: 8.6,
+    fontSize: 9,
+    lineHeight: 13.5,
     fontFamily: 'Poppins_800ExtraBold',
     fontWeight: '800',
     textTransform: 'uppercase',
+    letterSpacing: 0.45,
+    textAlign: 'center',
   },
+  // web: .profiling-stage-descriptions grid sm:grid-cols-2 border-t, mt/pt 0.25rem, gap 0.15rem 0.6rem
+  stageDescriptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    borderTopWidth: 1,
+    borderTopColor: '#E5E7EB',
+    marginTop: 4,
+    paddingTop: 4,
+    rowGap: 2.4,
+    columnGap: 9.6,
+  },
+  stageDescriptionItem: {
+    width: '48.6%', // (684 - 9.6) / 2 = 337.2px of the 684px inner card width
+  },
+  stageDescriptionTitle: {
+    color: '#1E232A',
+    fontSize: 8,
+    lineHeight: 9.6,
+    fontFamily: 'Poppins_700Bold',
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  stageDescriptionText: {
+    color: '#475569',
+    fontSize: 8,
+    lineHeight: 9.6,
+    fontFamily: 'Poppins_400Regular',
+    fontWeight: '400',
+  },
+  // web: .profiling-meaning-card rounded-xl border-[#E9ECEF] bg-white, padding 5px 8px
   whatItMeansCard: {
     backgroundColor: '#ffffff',
-    borderColor: '#e5e7eb',
+    borderColor: '#E9ECEF',
     borderWidth: 1,
     borderRadius: 12,
-    padding: 8,
-    marginBottom: 5,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
+    justifyContent: 'space-between',
   },
-  whatItMeansTitle: {
-    color: '#8C1814',
-    fontSize: 12.1,
-    fontFamily: 'Poppins_800ExtraBold',
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
+  // web: text-[12.5px] leading-snug text-[#2D3748] font-medium
   whatItMeansBody: {
-    color: '#334155',
-    fontSize: 11.5,
-    lineHeight: 15,
+    color: '#2D3748',
+    fontSize: 12.5,
+    lineHeight: 17.1875,
     fontFamily: 'Poppins_500Medium',
     fontWeight: '500',
-    textAlign: 'justify',
   },
+  // web: mt-2 pt-1.5 border-t border-slate-100 flex justify-between text-[10.5px] text-slate-700
   whatItMeansFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     borderTopWidth: 1,
     borderTopColor: '#f1f5f9',
-    marginTop: 6,
-    paddingTop: 4,
+    marginTop: 8,
+    paddingTop: 6,
   },
   whatItMeansFooterText: {
-    fontSize: 10.9,
-    color: '#64748b',
-    fontFamily: 'Poppins_500Medium',
-    fontWeight: '500',
+    fontSize: 10.5,
+    lineHeight: 15.75,
+    color: '#334155',
+    fontFamily: 'Poppins_400Regular',
+    fontWeight: '400',
   },
   fiveAreasHeaderRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 6,
     marginBottom: 6,
   },
-  fiveAreasTitle: {
-    color: '#1e293b',
-    fontSize: 12.6,
-    fontFamily: 'Poppins_800ExtraBold',
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  fiveAreasLegend: {
-    color: '#64748b',
-    fontSize: 10.9,
-    fontFamily: 'Poppins_500Medium',
-    fontWeight: '500',
-  },
+  // web: rounded-lg border-[#E5E7EB] bg-white, padding 5px 8px, gap-0.5
   areaCard: {
     backgroundColor: '#ffffff',
-    borderColor: '#e5e7eb',
+    borderColor: '#E5E7EB',
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 8,
+    paddingVertical: 5,
     paddingHorizontal: 8,
-    paddingVertical: 4,
+    justifyContent: 'space-between',
+    gap: 2,
   },
   areaTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 6,
+    gap: 8,
   },
   areaName: {
-    fontSize: 11.2,
-    fontFamily: 'Poppins_700Bold',
-    fontWeight: '700',
-    color: '#1e293b',
-  },
-  areaStageBadge: {
-    borderWidth: 1,
-    borderRadius: 5,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-  },
-  areaStageBadgeText: {
-    fontSize: 9.8,
-    fontFamily: 'Poppins_800ExtraBold',
-    fontWeight: '800',
-    textTransform: 'uppercase',
+    fontSize: 12,
+    lineHeight: 16,
+    fontFamily: 'Poppins_900Black',
+    fontWeight: '900',
+    color: '#1E232A',
   },
   miniBarContainer: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 2,
-    width: 60,
+    gap: 4,
   },
   miniBarSegment: {
     flex: 1,
-    height: 5,
-    borderRadius: 3,
+    height: 8,
+    borderRadius: 9999,
   },
   miniBarLabel: {
-    fontSize: 10.4,
-    color: '#64748b',
+    fontSize: 10,
+    lineHeight: 15,
+    color: '#334155',
     fontFamily: 'Poppins_700Bold',
     fontWeight: '700',
-    minWidth: 20,
+    minWidth: 28,
     textAlign: 'right',
   },
-  scoreBadge: {
-    backgroundColor: '#f1f5f9',
-    borderRadius: 5,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
-  },
-  scoreBadgeText: {
-    fontSize: 10.4,
-    color: '#334155',
-    fontFamily: 'Poppins_800ExtraBold',
-    fontWeight: '800',
-  },
+  // web: text-[11px] leading-tight text-[#4B5563] pl-6 font-medium
   areaMeaningText: {
     fontSize: 11,
-    color: '#475569',
-    lineHeight: 14,
-    marginTop: 2,
-    paddingLeft: 22,
+    lineHeight: 13.75,
+    color: '#4B5563',
+    paddingLeft: 24,
     fontFamily: 'Poppins_500Medium',
     fontWeight: '500',
-    textAlign: 'justify',
   },
+  // web: .profiling-guidance rounded-xl border-amber-300 bg-amber-50/70, padding 5px 8px
   notesCard: {
-    backgroundColor: '#fffbeb',
-    borderColor: '#fde68a',
+    backgroundColor: 'rgba(255, 251, 235, 0.7)',
+    borderColor: '#fcd34d',
     borderWidth: 1,
     borderRadius: 12,
-    padding: 7,
-    marginTop: 5,
+    paddingVertical: 5,
+    paddingHorizontal: 8,
   },
-  notesTitle: {
-    color: '#92400e',
-    fontSize: 12.1,
-    fontFamily: 'Poppins_800ExtraBold',
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  noteItem: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 6,
-    flexWrap: 'wrap',
-  },
-  flagNameBadge: {
-    backgroundColor: '#fef3c7',
-    borderRadius: 4,
-    paddingHorizontal: 4,
-    paddingVertical: 1,
-  },
+  // web: rounded bg-amber-200/90 text-amber-900 text-[10px] font-black px-1.5 mr-1.5 uppercase
   flagNameBadgeText: {
-    color: '#b45309',
-    fontSize: 9.8,
-    fontFamily: 'Poppins_800ExtraBold',
-    fontWeight: '800',
+    backgroundColor: 'rgba(253, 230, 138, 0.9)',
+    color: '#78350f',
+    fontSize: 10,
+    fontFamily: 'Poppins_900Black',
+    fontWeight: '900',
     textTransform: 'uppercase',
   },
+  // web: text-[10px] leading-tight text-amber-950 font-medium
   noteText: {
-    color: '#78350f',
-    fontSize: 11,
-    lineHeight: 14.5,
+    color: '#451a03',
+    fontSize: 10,
+    lineHeight: 12.5,
     fontFamily: 'Poppins_500Medium',
     fontWeight: '500',
-    flex: 1,
-    textAlign: 'justify',
   },
 });
