@@ -69,6 +69,41 @@ export function isValidPassword(value = '') {
   return value.length >= 6;
 }
 
+// Same policy as the user portal and the server, used when SETTING a password
+// (signup, reset, change). Login keeps the lenient check above so older passwords still work.
+export const PASSWORD_POLICY_MESSAGE =
+  'Password must be at least 8 characters and include a letter and a number.';
+
+export function isStrongPassword(value = '') {
+  const v = String(value);
+  return v.length >= 8 && v.length <= 128 && /[A-Za-z]/.test(v) && /\d/.test(v);
+}
+
+export function getNewPasswordError(value = '') {
+  if (!value) {
+    return 'Password is required.';
+  }
+  return isStrongPassword(value) ? '' : PASSWORD_POLICY_MESSAGE;
+}
+
+// Indian mobile numbers are 10 digits and start with 6-9 (same as the portal and server).
+export function isValidMobileNumber(value = '') {
+  return /^[6-9][0-9]{9}$/.test(normalizeMobile(value));
+}
+
+export function getMobileError(value = '') {
+  return value && !isValidMobileNumber(value) ? 'Enter a valid 10 digit mobile number starting with 6-9.' : '';
+}
+
+// "+91 98765 43210" style display, same as the portal's formatPhone.
+export function formatPhone(value) {
+  const digits = String(value ?? '').replace(/\D/g, '');
+  if (!digits) return '';
+  const national = digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits;
+  if (national.length === 10) return `+91 ${national.slice(0, 5)} ${national.slice(5)}`;
+  return String(value).trim();
+}
+
 export function getPasswordError(value = '') {
   if (!value) {
     return 'Password is required.';
@@ -184,4 +219,31 @@ export function mapApiUserToProfile(user) {
     dob: user.dataOfBirth ? formatDateForDisplay(String(user.dataOfBirth)) : '',
     childName: '',
   };
+}
+
+// The saved profile on the server is the source of truth. Its non-empty values (name, email,
+// address, ...) replace a stale or empty local copy; fields the server has nothing for keep
+// what is local. The password is never taken from the server.
+export function mergeServerProfile(localProfile = {}, serverProfile = null) {
+  if (!serverProfile) return localProfile;
+  const merged = { ...localProfile };
+  Object.entries(serverProfile).forEach(([key, value]) => {
+    if (key === 'password') return;
+    if (value !== '' && value !== null && value !== undefined) merged[key] = value;
+  });
+  return merged;
+}
+
+// The name to show for the signed-in user: the profile name, else the name on the login
+// session, else the username or the start of the email - never a made-up placeholder.
+export function getDisplayName(profile, authUser) {
+  const fromProfile = String(profile?.name || '').trim();
+  if (fromProfile) return fromProfile;
+  const fromSession = [authUser?.firstName, authUser?.lastName].filter(Boolean).join(' ').trim();
+  return (
+    fromSession ||
+    String(authUser?.username || '').trim() ||
+    String(authUser?.email || '').split('@')[0] ||
+    'My account'
+  );
 }

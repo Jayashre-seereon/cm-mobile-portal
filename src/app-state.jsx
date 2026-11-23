@@ -4,6 +4,7 @@ import { ensureAccessToken } from './api/axios';
 import { getNotifications } from './api/notificationApi';
 import { getMentorBookings, getSubscriptions, getTestHistory } from './api/profile';
 import { useAuthStore } from './store/auth-store';
+import { mapApiUserToProfile, mergeServerProfile } from './utils/auth';
 const planFeatures = {
     psychometric: ['psychometric-test'],
     premium: ['psychometric-test', 'book-mentor', 'master-class'],
@@ -389,7 +390,9 @@ export function AppStateProvider({ children }) {
                 });
                 const dashboardUser = extractDashboardUser(dashboardResponse);
                 if (dashboardUser) {
-                    setUserProfile((current) => ({ ...current, ...dashboardUser }));
+                    // Load the saved name/email/... from the server record (mapped to profile fields),
+                    // so the profile never depends on a stale or empty local copy.
+                    setUserProfile((current) => mergeServerProfile(current, mapApiUserToProfile(dashboardUser)));
                 }
 
                 setTestHistory(normalizeTestHistoryItems(testItems));

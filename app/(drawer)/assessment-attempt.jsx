@@ -178,12 +178,8 @@ export default function AssessmentAttemptScreen() {
     const updateTime = () => {
       const remaining = Math.max(0, APTITUDE_TIME_LIMIT_SECONDS - Math.floor((Date.now() - startedAt) / 1000));
       setAptitudeTimeLeft(remaining);
-      if (remaining === 0) {
-        setAptitudeExpired((prev) => {
-          if (!prev) setShowAptitudeExpiredModal(true);
-          return true;
-        });
-      }
+      // Same as the user portal: the 30-minute aptitude timer is temporarily NOT enforced, so a
+      // user can keep answering after it reaches 0 (no lock-out, no "time expired" popup).
     };
 
     updateTime();
@@ -313,6 +309,8 @@ export default function AssessmentAttemptScreen() {
   const unansweredQuestions = useMemo(() => {
     const list = [];
     sections.forEach((sec, sIdx) => {
+      // Aptitude questions are optional (skipped ones score 0); every other module is required.
+      if (isAptitudeSection(sec, sIdx)) return;
       const qList = Array.isArray(sec.questions) ? sec.questions : [];
       qList.forEach((q, qIdx) => {
         const isAnswered =

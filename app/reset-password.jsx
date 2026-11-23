@@ -9,7 +9,7 @@ import { useAppState } from '../src/app-state';
 import { AnimatedBackground } from '../src/animated-background';
 import { palette } from '../src/careermap-data';
 import { AnimatedPressable } from '../src/careermap-ui';
-import { isValidPassword } from '../src/utils/auth';
+import { PASSWORD_POLICY_MESSAGE, isStrongPassword } from '../src/utils/auth';
 
 export default function ResetPasswordScreen() {
   const { preferences } = useAppState();
@@ -25,7 +25,7 @@ export default function ResetPasswordScreen() {
     message: '',
   });
 
-  const canSubmit = token && isValidPassword(newPassword) && newPassword === confirmPassword;
+  const canSubmit = token && isStrongPassword(newPassword) && newPassword === confirmPassword;
 
   const handleResetPassword = async () => {
     if (!token) {
@@ -36,10 +36,10 @@ export default function ResetPasswordScreen() {
       return;
     }
 
-    if (!isValidPassword(newPassword)) {
+    if (!isStrongPassword(newPassword)) {
       setStatus({
         type: 'error',
-        message: 'Password must be at least 6 characters.',
+        message: PASSWORD_POLICY_MESSAGE,
       });
       return;
     }

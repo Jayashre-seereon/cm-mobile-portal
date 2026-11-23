@@ -101,6 +101,8 @@ function mapMasterclassItem(item, index) {
 
   return {
     id: String(item?.id ?? `${item?.title ?? 'masterclass'}-${index}`),
+    // kept so "newest first" (preview free videos) sorts by date, like the user portal
+    createdAt: item?.createdAt || item?.created_at || null,
     title: item?.title || 'Untitled Career & Personality Videos',
     image: item?.image || null,
     mentor: resolveMentorName(item),

@@ -6,8 +6,11 @@ import { Text, View, useWindowDimensions } from 'react-native';
 import RenderHTML from 'react-native-render-html';
 import { useAppState } from '../../src/app-state';
 import { palette } from '../../src/careermap-data';
-import { getEntranceExams } from '../../src/api/entranceExamApi';
+import { getEntranceExamById } from '../../src/api/entranceExamApi';
 import { AnimatedPressable, Screen } from '../../src/careermap-ui';
+
+// Exams opened during this session (the full record is loaded only when an exam is opened).
+const examDetailCache = new Map();
 
 function DetailCard({ title, children }) {
     const { preferences } = useAppState();
@@ -34,38 +37,57 @@ export default function EntranceExamDetailScreen() {
     const { preferences } = useAppState();
     const { examId } = useLocalSearchParams();
     const { width: screenWidth } = useWindowDimensions();
-    const [entranceExams, setEntranceExams] = useState([]);
+    const id = String(examId ?? '');
+    const [exam, setExam] = useState(() => examDetailCache.get(id) || null);
+    const [detailError, setDetailError] = useState('');
+    const [reloadKey, setReloadKey] = useState(0);
 
     useEffect(() => {
         let isMounted = true;
+        const cached = examDetailCache.get(id);
+        setDetailError('');
+        setExam(cached || null);
+        if (cached || !id) {
+            if (!id) setDetailError('Could not load the exam details.');
+            return undefined;
+        }
 
-        async function loadEntranceExams() {
+        async function loadExam() {
             try {
-                const items = await getEntranceExams();
-
+                const full = await getEntranceExamById(id);
+                examDetailCache.set(id, full);
+                if (isMounted) setExam(full);
+            } catch (loadError) {
                 if (isMounted) {
-                    setEntranceExams(items);
-                }
-            } catch (_error) {
-                if (isMounted) {
-                    setEntranceExams([]);
+                    setDetailError(
+                        loadError?.response?.data?.message ||
+                        loadError?.message ||
+                        'Could not load the exam details.'
+                    );
                 }
             }
         }
 
-        loadEntranceExams();
+        loadExam();
 
         return () => {
             isMounted = false;
         };
-    }, []);
-
-    const exam = entranceExams.find((item) => item.id === String(examId)) ?? entranceExams[0];
+    }, [id, reloadKey]);
 
     if (!exam) {
         return (
             <Screen>
-                <Text className={`text-[14px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Loading exam details...</Text>
+                {detailError ? (
+                    <View className="flex-row flex-wrap items-center gap-3">
+                        <Text className={`text-[14px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{detailError}</Text>
+                        <AnimatedPressable onPress={() => setReloadKey((value) => value + 1)} className="rounded-[10px] border border-brand px-3 py-1">
+                            <Text className="text-[12px] font-bold text-brand">Try again</Text>
+                        </AnimatedPressable>
+                    </View>
+                ) : (
+                    <Text className={`text-[14px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Loading exam details...</Text>
+                )}
             </Screen>
         );
     }

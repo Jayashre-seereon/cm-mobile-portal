@@ -128,8 +128,21 @@ export async function getCareerLibraryInstitutions({
         ? response.data
         : [];
 
+  // The institute list sends the website in `url` (the shared mapper turns a missing one into '#').
+  // Same field order as the portal's getInstituteWebsite; '' when there is no usable website.
+  const websiteOf = (item = {}) => {
+    const value = item.url || item.website || item.website_url || item.official_website || item.officialWebsite ||
+      item.institute_website || item.instituteWebsite || item.college_website || item.collegeWebsite || item.web_url || item.website_link || '';
+    const website = String(value).trim();
+    if (!website || website === '#') return '';
+    return /^https?:\/\//i.test(website) ? website : `https://${website}`;
+  };
+
   return {
-    items: items.map((item, index) => mapInstituteItem(item, index)),
+    items: items.map((item, index) => {
+      const website = websiteOf(item);
+      return { ...mapInstituteItem(item, index), url: website, website };
+    }),
     pagination: response?.data?.pagination || null,
   };
 }
@@ -143,4 +156,31 @@ export async function getInstituteById(id) {
 export async function getCategories() {
   const response = await api.get('/categories/');
   return response?.data;
+}
+
+// Filter options for the institute screen. Every list only contains values that still have
+// institutes once the OTHER selected filters are applied, so the filters work in any order
+// (category -> state -> type, type -> state -> category, ...). Same endpoint as the user portal.
+export async function getInstituteFilters({ category = '', country = '', state = '', type = '' } = {}) {
+  const params = new URLSearchParams();
+  const clean = (value) => (value && String(value).toLowerCase() !== 'all' ? String(value) : '');
+
+  if (clean(category)) params.append('category', clean(category));
+  if (clean(state)) params.append('state', clean(state));
+  if (clean(type)) params.append('type', clean(type));
+
+  // The mobile screen offers India / Other as country choices.
+  const normalizedCountry = clean(country).toLowerCase();
+  if (normalizedCountry === 'india') params.append('country', 'india');
+  else if (normalizedCountry === 'other') params.append('excludeCountry', 'india');
+  else if (normalizedCountry) params.append('country', normalizedCountry);
+
+  const response = await api.get(`/careerlibrary/institutions/filters?${params.toString()}`);
+  const data = response?.data || {};
+  return {
+    categories: Array.isArray(data.categories) ? data.categories : [],
+    countries: Array.isArray(data.countries) ? data.countries : [],
+    states: Array.isArray(data.states) ? data.states : [],
+    types: Array.isArray(data.types) ? data.types : [],
+  };
 }

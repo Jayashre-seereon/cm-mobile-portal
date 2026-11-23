@@ -2,7 +2,15 @@ import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Linking } from 'react-native';
+import { getUserDashboard } from '../api/authApi';
 import { checkModuleAccess, getModules } from '../api/moduleAccessApi';
+import {
+  PREVIEW_MODULES,
+  getPreviewAccessKind,
+  getPreviewLimit,
+  loadPreviewFreeKeys,
+  resolvePreviewAccess,
+} from './previewAccess';
 
 /**
  * One place that turns a global-search item (GET /api/search result, also used for
@@ -198,13 +206,104 @@ async function findModuleId(matchers) {
   return null;
 }
 
+// Module route -> previewAccess module key (which list / flag decides the free items).
+export const ROUTE_PREVIEW_MODULE = {
+  [ROUTES.library]: PREVIEW_MODULES.library,
+  [ROUTES.institute]: PREVIEW_MODULES.institutes,
+  [ROUTES.entranceExam]: PREVIEW_MODULES.entranceExam,
+  [ROUTES.quiz]: PREVIEW_MODULES.quiz,
+  [ROUTES.mentor]: PREVIEW_MODULES.mentor,
+  [ROUTES.learn]: PREVIEW_MODULES.videos,
+  [ROUTES.newsletter]: PREVIEW_MODULES.newsletter,
+  [ROUTES.abroad]: PREVIEW_MODULES.abroad,
+  [ROUTES.scholarship]: PREVIEW_MODULES.scholarships,
+};
+
+// Preview modules whose items are all free, so search never locks them item by item.
+// Quiz has no first-4 rule: every quiz is free (the quiz screen, like the portal's QuizPage,
+// lets anyone take any quiz; the server withholds the score in preview instead).
+export const ALWAYS_FREE_PREVIEW_MODULES = new Set([PREVIEW_MODULES.quiz]);
+
+// Same wording as the portal's GlobalSearchBar.
+export const MODULE_LOCKED_HEADING = 'Module Locked';
+export const MODULE_LOCK_MESSAGE =
+  'This module is locked. Please purchase a subscription to continue accessing this module.';
+export const PREVIEW_LOCK_MESSAGE = 'This page is locked. Please purchase a subscription to open';
+export const VERIFY_FAILED_HEADING = 'Unable to verify access';
+export const VERIFY_FAILED_MESSAGE =
+  "We couldn't verify your access right now. Please try again in a moment.";
+
+/** "unlocked" | "preview" | "locked" | null (the server's "full" counts as unlocked). */
+export function normalizeAccessStatus(status) {
+  const value = lower(status);
+  if (value === 'unlocked' || value === 'full') return 'unlocked';
+  if (value === 'preview') return 'preview';
+  if (value === 'locked') return 'locked';
+  return null;
+}
+
+/** Search results that open one specific page inside a module (not a module card). */
+export function isDirectSearchResult(item = {}) {
+  const type = lower(item?.type);
+  const group = lower(item?.group);
+  if (type === 'module' || group === 'modules') return false;
+  return (
+    ['careers', 'career', 'careerpaths'].includes(group) ||
+    CAREER_TYPES.includes(type) ||
+    ['institution', 'institute', 'institutes', 'college', 'colleges'].includes(type) ||
+    ['institutions', 'colleges'].includes(group) ||
+    ['entranceexam', 'entranceexams', 'exam', 'exams'].includes(type) ||
+    ['entranceexams', 'exams'].includes(group) ||
+    ['scholarship', 'scholarships'].includes(type) ||
+    group === 'scholarships' ||
+    ['masterclass', 'masterclasses', 'learn', 'video', 'videos'].includes(type) ||
+    ['masterclasses', 'learn', 'videos'].includes(group) ||
+    ['quiz', 'quizzes'].includes(type) ||
+    group === 'quizzes' ||
+    ['newsletter', 'newsletters'].includes(type) ||
+    group === 'newsletters' ||
+    ['studyabroad', 'study_abroad', 'abroad'].includes(type) ||
+    ['studyabroad', 'study_abroad', 'abroad'].includes(group) ||
+    ['mentor', 'mentors'].includes(type) ||
+    group === 'mentors'
+  );
+}
+
+/**
+ * Dashboard modules (GET /user/dashboard, each with its Unlocked / Preview / Locked
+ * `accessStatus`) keyed by mobile route, like the portal's dashboardData.modules.
+ * @returns {Promise<Map<string, { id: any, title: string, accessStatus: string }>>}
+ */
+export async function loadDashboardModulesByRoute() {
+  const response = await getUserDashboard();
+  const modules = Array.isArray(response?.data?.modules) ? response.data.modules : [];
+  const map = new Map();
+  const gates = {
+    ...MODULE_GATES,
+    [ROUTES.assessment]: { title: 'Career Psychometric Assessment', matchers: ['psychometric', 'assessment'] },
+  };
+  Object.entries(gates).forEach(([route, gate]) => {
+    for (const matcher of gate.matchers) {
+      const found = modules.find((module) => lower(module?.title).includes(matcher));
+      if (found) {
+        map.set(route, { id: found.id, title: found.title || gate.title, accessStatus: lower(found.accessStatus) });
+        break;
+      }
+    }
+  });
+  return map;
+}
+
 /**
  * Navigate to a resolved target the way the dashboard does.
+ * With `searchItem` (a global-search result that opens one page inside a module) it also
+ * follows the portal's search rules: a locked module, or a preview module's locked item,
+ * shows the lock prompt, and when access can't be verified the page stays closed.
  * @param {{ pathname?: string, params?: object, url?: string }} target
- * @param {{ onLocked?: (info: { title: string, message: string, returnTarget: object }) => void }} options
+ * @param {{ onLocked?: (info: { title: string, message: string, returnTarget: object }) => void, fromGlobalSearch?: boolean, searchItem?: object }} options
  * @returns {Promise<'external'|'opened'|'locked'>}
  */
-export async function openTarget(target, { onLocked, fromGlobalSearch = false } = {}) {
+export async function openTarget(target, { onLocked, fromGlobalSearch = false, searchItem } = {}) {
   if (!target) {
     return 'opened';
   }
@@ -221,12 +320,23 @@ export async function openTarget(target, { onLocked, fromGlobalSearch = false } 
     ...(hasItem ? { searchKey: String(Date.now()) } : {}),
     ...(fromGlobalSearch ? { fromGlobalSearch: '1' } : {}),
   };
+  // The assessment screen has no gate: it is always enterable and handles its own lock.
   const gate = MODULE_GATES[pathname];
+  const isDirectResult = Boolean(searchItem) && isDirectSearchResult(searchItem);
 
   if (!gate) {
     router.push({ pathname, params });
     return 'opened';
   }
+
+  const verifyFailed = () => {
+    onLocked?.({
+      title: VERIFY_FAILED_HEADING,
+      message: VERIFY_FAILED_MESSAGE,
+      returnTarget: { pathname, params: {} },
+    });
+    return 'locked';
+  };
 
   let moduleId = null;
   try {
@@ -236,6 +346,8 @@ export async function openTarget(target, { onLocked, fromGlobalSearch = false } 
   }
 
   if (!Number.isFinite(moduleId)) {
+    // Module access unknown -> don't let search open a page inside it.
+    if (isDirectResult) return verifyFailed();
     router.push({ pathname, params });
     return 'opened';
   }
@@ -244,18 +356,37 @@ export async function openTarget(target, { onLocked, fromGlobalSearch = false } 
     const response = await checkModuleAccess(moduleId);
     if (!response?.allowed) {
       onLocked?.({
-        title: `Unlock ${gate.title}`,
-        message: `This module is locked. Please purchase a subscription to continue accessing this module. ${gate.title}`,
+        title: MODULE_LOCKED_HEADING,
+        message: `${MODULE_LOCK_MESSAGE} ${gate.title}`,
         returnTarget: { pathname, params: { moduleId: String(moduleId) } },
       });
       return 'locked';
     }
     const mode = lower(response?.mode);
+    // In preview, a specific page opens from search only if the module's own list shows
+    // that item as free (first N of the full list / admin free flag / career category flag).
+    const previewModuleKey = ROUTE_PREVIEW_MODULE[pathname];
+    if (isDirectResult && mode !== 'full' && previewModuleKey && !ALWAYS_FREE_PREVIEW_MODULES.has(previewModuleKey)) {
+      const moduleKey = previewModuleKey;
+      const freeKeys =
+        getPreviewAccessKind(moduleKey) === 'list'
+          ? await loadPreviewFreeKeys(moduleKey, getPreviewLimit(moduleKey, response))
+          : undefined;
+      if (resolvePreviewAccess(searchItem, moduleKey, { freeKeys }) === 'locked') {
+        onLocked?.({
+          title: MODULE_LOCKED_HEADING,
+          message: `${PREVIEW_LOCK_MESSAGE} ${String(searchItem?.title || '').trim()}`.trim(),
+          returnTarget: { pathname, params: { moduleId: String(moduleId) } },
+        });
+        return 'locked';
+      }
+    }
     router.push({
       pathname,
       params: { ...params, moduleId: String(moduleId), accessStatus: mode === 'full' ? 'unlocked' : 'preview' },
     });
   } catch {
+    if (isDirectResult) return verifyFailed();
     router.push({ pathname, params });
   }
   return 'opened';

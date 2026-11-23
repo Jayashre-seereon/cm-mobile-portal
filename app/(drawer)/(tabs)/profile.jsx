@@ -7,7 +7,7 @@ import { getApiErrorMessage, getProfileUpdatePayload, getUserDashboard, logoutUs
 import { palette } from '../../../src/careermap-data';
 import { AnimatedPressable, Pill, Screen } from '../../../src/careermap-ui';
 import { StaggerFadeUpItem } from '../../../src/page-transition';
-import { formatDateForApi, formatDateForDisplay, getDateError, mapApiUserToProfile, splitFullName } from '../../../src/utils/auth';
+import { formatDateForApi, formatDateForDisplay, formatPhone, getDateError, getDisplayName, mapApiUserToProfile, mergeServerProfile, splitFullName } from '../../../src/utils/auth';
 import { useAuthStore } from '../../../src/store/auth-store';
 export default function ProfileScreen() {
     const { activePlanId, bookings, hasActiveSubscription, onboarding, preferences, profileEditRequestKey, requestProfileEdit, savedCareers, saveUserProfile, subscriptionRecords, testHistory, toggleDarkMode, userProfile, } = useAppState();
@@ -27,6 +27,8 @@ export default function ProfileScreen() {
     const [fieldErrors, setFieldErrors] = useState({ dob: '' });
     const [isSaving, setIsSaving] = useState(false);
     const [isDashboardLoading, setIsDashboardLoading] = useState(false);
+    const [dashboardError, setDashboardError] = useState(false);
+    const [dashboardReloadKey, setDashboardReloadKey] = useState(0);
     const [isLoggingOut, setIsLoggingOut] = useState(false);
     const hasLoadedDashboardRef = useRef(false);
     useEffect(() => {
@@ -49,6 +51,7 @@ export default function ProfileScreen() {
         async function loadDashboardProfile() {
             try {
                 setIsDashboardLoading(true);
+                setDashboardError(false);
                 const response = await getUserDashboard();
                 const dashboardUser = response?.data?.data || response?.data?.user || response?.data || null;
                 if (!dashboardUser || !isMounted) {
@@ -58,9 +61,8 @@ export default function ProfileScreen() {
                 if (mappedProfile) {
                     const fullName = [dashboardUser?.firstName, dashboardUser?.lastName].filter(Boolean).join(' ').trim();
                     const mergedProfile = {
-                        ...userProfile,
-                        ...mappedProfile,
-                        dob: formatDateForDisplay(mappedProfile.dob),
+                        ...mergeServerProfile(userProfile, mappedProfile),
+                        dob: formatDateForDisplay(mappedProfile.dob || userProfile.dob),
                         name: fullName || mappedProfile.name || userProfile.name || '',
                         email: dashboardUser?.email || mappedProfile.email || userProfile.email || '',
                         mobile: dashboardUser?.mobile || mappedProfile.mobile || userProfile.mobile || '',
@@ -75,7 +77,11 @@ export default function ProfileScreen() {
                 setAuthUser(dashboardUser);
             }
             catch (_error) {
-                // Keep the local profile if the dashboard request fails.
+                // Keep the local profile if the dashboard request fails, but tell the user (with a retry)
+                // instead of silently showing an empty profile.
+                if (isMounted) {
+                    setDashboardError(true);
+                }
             }
             finally {
                 if (isMounted) {
@@ -87,15 +93,27 @@ export default function ProfileScreen() {
         return () => {
             isMounted = false;
         };
-    }, [saveUserProfile, setAuthUser, userProfile]);
+    }, [saveUserProfile, setAuthUser, userProfile, dashboardReloadKey]);
     useEffect(() => {
         if (profileEditRequestKey > 0) {
             setEditMode(true);
         }
     }, [profileEditRequestKey]);
-    const displayName = onboarding.userType === 'parent' ? userProfile.name || 'Parent User' : userProfile.name || 'Student User';
-    const profileClass = onboarding.selectedClass || 'Class 11';
-    const profileStream = onboarding.selectedStream || 'Science';
+    const displayName = getDisplayName(userProfile, authUser);
+    const displayEmail = userProfile.email || authUser?.email || 'No email added yet';
+    const displayMobile = formatPhone(userProfile.mobile || authUser?.mobile) || 'Not set';
+    // Class / stream only when the user really chose them (no invented "Class 11 / Science").
+    const profileClass = onboarding.selectedClass || '';
+    const profileStream = onboarding.selectedStream || '';
+    // Same money format as the user portal (₹1,200).
+    const formatInr = (value) => {
+        const numeric = Number(String(value ?? '').replace(/[^\d.]/g, ''));
+        if (value === null || value === undefined || value === '' || !Number.isFinite(numeric)) {
+            return '';
+        }
+        return `₹${numeric.toLocaleString('en-IN', { maximumFractionDigits: 0 })}`;
+    };
+    const currentPlanName = subscriptionRecords.find((record) => String(record.status || '').toLowerCase() === 'active');
     const menuItems = useMemo(() => [
         
         {
@@ -242,11 +260,24 @@ export default function ProfileScreen() {
           {subscriptionRecords.map((record) => (<AnimatedPressable key={record.id} className={`gap-1 rounded-[18px] px-4 py-3 ${preferences.darkMode ? 'bg-[#111111]' : 'bg-surface'}`} onPress={() => router.push('/(drawer)/subscription')}>
               <View className="flex-row items-center justify-between">
                 <Text className={`text-[13px] font-extrabold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{record.subscriptionName || record.planName}</Text>
-                <Text className="text-[13px] font-extrabold text-brand">{record.amount !== "" && record.amount != null ? `Rs ${record.amount}` : record.price}</Text>
+                <Text className="text-[13px] font-extrabold text-brand">{record.amount !== "" && record.amount != null ? (formatInr(record.amount) || `Rs ${record.amount}`) : record.price}</Text>
               </View>
               <Text className={`text-[11px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Validity: {record.validity || record.expiryDate}</Text>
               <Text className={`self-start rounded-full px-3 py-1 text-[11px] font-bold ${String(record.status || '').toLowerCase() === 'active' ? 'bg-[#e9f8ed] text-[#238344]' : 'bg-gray-200 text-gray-600'}`}>{record.status || 'Inactive'}</Text>
             </AnimatedPressable>))}
+        </View>);
+        }
+        // Nothing to list yet: say so instead of an empty gap (the portal shows an empty list too).
+        const emptyText = section === 'tests'
+            ? 'No tests taken yet.'
+            : section === 'bookings'
+                ? 'No mentor bookings yet.'
+                : section === 'subscription'
+                    ? 'You are currently on the Free Tier.'
+                    : '';
+        if (emptyText) {
+            return (<View className={`border-t px-4 py-4 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-[#fcf8f5]'}`}>
+          <Text className={`text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{isDashboardLoading ? 'Loading...' : emptyText}</Text>
         </View>);
         }
         return null;
@@ -291,7 +322,7 @@ export default function ProfileScreen() {
           <View className="gap-1.5">
             <Text className={`text-[12px] font-extrabold ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Mobile Number</Text>
             <View className={`rounded-[18px] border px-4 py-[14px] ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#111111]' : 'border-line bg-surface'}`}>
-              <Text className={`text-[14px] ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{form.mobile || 'Not set'}</Text>
+              <Text className={`text-[14px] ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{formatPhone(form.mobile) || 'Not set'}</Text>
             </View>
             <Text className={`text-[11px] font-semibold ${preferences.darkMode ? 'text-[#8e8691]' : 'text-muted'}`}>Can&apos;t edit</Text>
           </View>
@@ -342,17 +373,32 @@ export default function ProfileScreen() {
         </AnimatedPressable>
       </View>
 
+      {isDashboardLoading ? (<View className={`rounded-[18px] border px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#111111]' : 'border-line bg-surface'}`}>
+          <Text className={`text-[13px] font-extrabold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>Loading profile details...</Text>
+        </View>) : null}
+      {!isDashboardLoading && dashboardError ? (<View className={`flex-row items-center justify-between gap-3 rounded-[18px] border px-4 py-3 ${preferences.darkMode ? 'border-[#5a2630] bg-[#2b151b]' : 'border-[#efc8c0] bg-[#fff4f2]'}`}>
+          <Text className="flex-1 text-[12px] font-bold text-danger">Could not load your profile from the server.</Text>
+          <AnimatedPressable className="rounded-[12px] bg-brand px-4 py-2" onPress={() => {
+                hasLoadedDashboardRef.current = false;
+                setDashboardReloadKey((key) => key + 1);
+            }}>
+            <Text className="text-[12px] font-extrabold text-white">Retry</Text>
+          </AnimatedPressable>
+        </View>) : null}
+
       <View className={`items-center rounded-[28px] border p-5 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`}>
         <View className="h-20 w-20 items-center justify-center rounded-full" style={{ backgroundColor: `${palette.primary}12` }}>
           <Text className="text-[30px] font-black text-brand">{displayName.charAt(0).toUpperCase()}</Text>
         </View>
         <Text className={`mt-3 text-[22px] font-black ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{displayName}</Text>
         {onboarding.userType === 'parent' && userProfile.childName ? (<Text className="mt-1 text-[12px] font-extrabold text-brand">Child: {userProfile.childName}</Text>) : null}
-        <Text className={`mt-1 text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{userProfile.email || 'Not set'}</Text>
-        <Text className={`text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{userProfile.mobile || 'Not set'}</Text>
-        <View className="mt-3 flex-row gap-2">
-          <Pill label={profileClass} tone={palette.primary}/>
-          <Pill label={profileStream} tone={palette.purple}/>
+        <Text className={`mt-1 text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{displayEmail}</Text>
+        <Text className={`text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{displayMobile}</Text>
+        <View className="mt-3 flex-row flex-wrap justify-center gap-2">
+          <Pill label={hasActiveSubscription ? 'Subscribed' : 'Free tier'} tone={palette.secondary}/>
+          <Pill label={`${bookings.length} bookings`} tone={palette.muted}/>
+          {profileClass ? <Pill label={profileClass} tone={palette.primary}/> : null}
+          {profileStream ? <Pill label={profileStream} tone={palette.purple}/> : null}
         </View>
         {onboarding.userType === 'parent' ? <Pill label="Parent Account" tone={palette.secondary}/> : null}
         <AnimatedPressable className="mt-4 rounded-[16px] bg-brand px-5 py-3" onPress={requestProfileEdit}>
@@ -417,7 +463,7 @@ export default function ProfileScreen() {
       </AnimatedPressable>
 
       <Text className={`text-center text-[11px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>
-        Current plan: {hasActiveSubscription ? activePlanId : 'No active plan'}
+        Current plan: {hasActiveSubscription ? (currentPlanName?.subscriptionName || currentPlanName?.planName || 'Active plan') : 'No active plan'}
       </Text>
     </Screen>);
 }

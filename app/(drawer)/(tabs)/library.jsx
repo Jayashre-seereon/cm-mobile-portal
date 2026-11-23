@@ -50,12 +50,18 @@ function normalizeInstituteItems(value) {
             type: String(item?.institute_type || item?.type || '').trim(),
             logo: item?.logo || item?.image || null,
             isTop: Boolean(item?.is_top ?? item?.isTop),
-            url: item?.url || item?.website || null,
+            url: getWebsiteUrl(item?.url || item?.website || item?.raw?.url),
             raw: item?.raw || item,
-            admissionProcess: item?.admissionProcess || item?.admission_process || item?.raw?.admission_process || '',
+            admissionProcess: stripHtml(item?.admissionProcess || item?.admission_process || item?.raw?.admission_process || ''),
             tentativeDate: item?.tentativeDate || item?.tentative_date || item?.raw?.tentative_date || null,
         };
     });
+}
+// Website from the field the institute list provides (`url`); null when missing or a '#' placeholder.
+function getWebsiteUrl(value) {
+    const website = String(value || '').trim();
+    if (!website || website === '#') return null;
+    return /^https?:\/\//i.test(website) ? website : `https://${website}`;
 }
 const INDIA_STATE_OPTIONS = [
     'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chhattisgarh', 'Goa', 'Gujarat',
@@ -210,7 +216,7 @@ function InstituteResultsSection({ title, scope, region, badge, emptyText, showL
                             </View>
                             {badge ? <Text className="rounded-full px-2 py-1 text-[10px] font-semibold" style={{ backgroundColor: isGovernment ? '#eaf7ef' : '#fdf0ee', color: isGovernment ? '#2f9367' : palette.primary }}>{badge}</Text> : null}
                         </View>
-                        <View className="flex-row items-start gap-3 px-4 py-4">
+                        <View className="flex-row items-start gap-3 px-4 py-4" style={institution.url ? { paddingRight: 48 } : undefined}>
                             <View className={`h-[56px] w-[56px] items-center justify-center overflow-hidden rounded-[16px] border ${darkMode ? 'border-[#292329] bg-[#111111]' : 'border-[#f0e4e2] bg-[#fffaf8]'}`}>
                                 <InstituteLogo uri={institution.logo} color={palette.primary}/>
                             </View>
@@ -222,10 +228,22 @@ function InstituteResultsSection({ title, scope, region, badge, emptyText, showL
                                 </View>
                             </View>
                         </View>
-                        {institution.admissionProcess || tentativeDate ? <View className={`flex-row flex-wrap gap-2 border-t px-4 py-3 ${darkMode ? 'border-[#292329]' : 'border-[#f7eeec]'}`}>
+                        {institution.admissionProcess || tentativeDate ? <View className={`flex-row flex-wrap gap-2 border-t px-4 py-3 ${darkMode ? 'border-[#292329]' : 'border-[#f7eeec]'}`} style={institution.url ? { paddingRight: 48 } : undefined}>
                             {institution.admissionProcess ? <View className={`min-w-[45%] flex-1 rounded-[12px] px-3 py-2 ${darkMode ? 'bg-[#171313]' : 'bg-[#fff8f4]'}`}><Text className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#b8837e' }}>Admission Via</Text><Text className={`mt-1 text-[12px] font-semibold ${darkMode ? 'text-white' : 'text-ink'}`}>{institution.admissionProcess}</Text></View> : null}
                             {tentativeDate ? <View className={`min-w-[45%] flex-1 rounded-[12px] px-3 py-2 ${darkMode ? 'bg-[#111923]' : 'bg-[#f7fbff]'}`}><Text className="text-[9px] font-bold uppercase tracking-widest" style={{ color: '#6c88a8' }}>Tentative Date</Text><Text className={`mt-1 text-[12px] font-semibold ${darkMode ? 'text-white' : 'text-ink'}`}>{tentativeDate}</Text></View> : null}
                         </View> : null}
+                        {institution.url ? (
+                            <Pressable
+                                onPress={() => { Linking.openURL(institution.url).catch(() => {}); }}
+                                accessibilityRole="link"
+                                accessibilityLabel={`Open ${institution.name} website`}
+                                hitSlop={8}
+                                className="h-8 w-8 items-center justify-center rounded-full"
+                                style={{ position: 'absolute', right: 12, bottom: 12, backgroundColor: darkMode ? '#301b1d' : '#fdf0ee' }}
+                            >
+                                <Ionicons name="arrow-forward" size={15} color={palette.primary}/>
+                            </Pressable>
+                        ) : null}
                     </View>
                 );
             })}
@@ -495,8 +513,14 @@ export default function CareerLibraryScreen() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [showUnlockSheet, setShowUnlockSheet] = useState(false);
-    const [hasFullAccess, setHasFullAccess] = useState(false);
-   const [moduleStatus, setModuleStatus] = useState('locked');
+    // Full access = route said "unlocked"/"full" (cards, menu, search) or the live server check said "full".
+    const [serverFullAccess, setHasFullAccess] = useState(false);
+    const routeFullAccess = ['unlocked', 'full'].includes(String(params.accessStatus || '').toLowerCase());
+    const hasFullAccess = serverFullAccess || routeFullAccess;
+    // Same default as the user portal: "preview" until the live access check says otherwise. Opened
+    // from the menu there are no route params, so starting at "locked" made every category look
+    // locked (and skipped the preview session) until the module had been discovered.
+    const [moduleStatus, setModuleStatus] = useState('preview');
     const [lockSheetDismissible, setLockSheetDismissible] = useState(true);
     const [isCategoryFree, setIsCategoryFree] = useState(false);
     const [previewSessionId, setPreviewSessionId] = useState(null);
@@ -527,14 +551,13 @@ export default function CareerLibraryScreen() {
             const id = Number(archive?.id);
             if (active && Number.isFinite(id)) setDiscoveredModuleId(id);
             else if (active) {
+                // Module not found: keep the portal's default (preview); the server still decides per page.
                 setHasFullAccess(false);
-                setModuleStatus('locked');
                 setModuleAccessReady(true);
             }
         }).catch(() => {
             if (active) {
                 setHasFullAccess(false);
-                setModuleStatus('locked');
                 setModuleAccessReady(true);
             }
         });
@@ -619,6 +642,21 @@ export default function CareerLibraryScreen() {
             }
         };
     }, [previewRemaining]);
+    // Leaving a career detail page ends its preview countdown. Otherwise the old timer kept running
+    // and ran out while the NEXT detail page was open, locking a page whose own preview had barely
+    // started. (A timer that has already expired stays expired: the page is locked as before.)
+    const previousLevelRef = useRef(currentLevel);
+    useEffect(() => {
+        if (previousLevelRef.current === 'details' && currentLevel !== 'details') {
+            if (previewIntervalRef.current) {
+                clearInterval(previewIntervalRef.current);
+                previewIntervalRef.current = null;
+            }
+            setPreviewRemaining(0);
+            setPreviewSessionId(null);
+        }
+        previousLevelRef.current = currentLevel;
+    }, [currentLevel]);
    useEffect(() => {
     let isMounted = true;
     const loadModuleAccess = async () => {
@@ -672,9 +710,11 @@ export default function CareerLibraryScreen() {
             subCategoryId: selectedSubCategory?.id,
         },
     }), [currentLevel, selectedStream, selectedCategory, selectedSecondCategory, selectedSubCategory, isCategoryFree]);
-    const createPreviewSession = async (pageType, pageId, item) => {
-        if (moduleStatus !== 'preview') {
-            return null;
+    // Returns { ok, sessionId }. ok:false = the server refused (the unlock sheet is already shown).
+    // `force` is for a deep link that has just checked the live access mode itself.
+    const createPreviewSession = async (pageType, pageId, item, { force = false } = {}) => {
+        if (!force && moduleStatus !== 'preview') {
+            return { ok: true, sessionId: null };
         }
 
         try {
@@ -684,27 +724,48 @@ export default function CareerLibraryScreen() {
                 pageId,
             });
 
-            setPreviewSessionId(preview?.previewSessionId || preview?.access?.previewSessionId || preview?.access?.sessionId || null);
-            setPreviewRemaining(preview?.remainingSeconds ?? preview?.access?.remainingSeconds ?? preview?.previewDurationSeconds ?? preview?.access?.previewDurationSeconds ?? 15);
+            // The server answers HTTP 200 with allowed:false when this content isn't free in preview
+            // (its category isn't marked free): show the unlock sheet instead of an empty page.
+            if (preview?.allowed === false) {
+                setLockSheetDismissible(true);
+                setShowUnlockSheet(true);
+                return { ok: false, sessionId: null };
+            }
+            if (String(preview?.mode || '').toLowerCase() === 'full') {
+                setModuleStatus('full');
+                setHasFullAccess(true);
+                return { ok: true, sessionId: null };
+            }
 
-            return preview?.previewSessionId || preview?.access?.previewSessionId || preview?.access?.sessionId || null;
+            const sessionId = preview?.previewSessionId || preview?.access?.previewSessionId || preview?.access?.sessionId || null;
+            if (!sessionId) {
+                setLockSheetDismissible(true);
+                setShowUnlockSheet(true);
+                return { ok: false, sessionId: null };
+            }
+            setPreviewSessionId(sessionId);
+            setPreviewRemaining(preview?.remainingSeconds ?? preview?.access?.remainingSeconds ?? preview?.previewDurationSeconds ?? preview?.access?.previewDurationSeconds ?? 15);
+            setPreviewExpired(false);
+
+            return { ok: true, sessionId };
         } catch (err) {
             if (err?.response?.status === 403) {
                 setLockSheetDismissible(true);
                 setShowUnlockSheet(true);
-                return null;
+                return { ok: false, sessionId: null };
             }
             throw err;
         }
     };
-    const loadDetailItemsWithPreview = async ({ type, id, item, nextItems }) => {
-        let previewId = null;
+    const loadDetailItemsWithPreview = async ({ type, id, item, nextItems, presetPreviewId }) => {
+        let previewId = presetPreviewId || null;
 
-        if (moduleStatus === 'preview') {
-            previewId = await createPreviewSession(type, id, item);
-            if (!previewId) {
+        if (!previewId && moduleStatus === 'preview') {
+            const gate = await createPreviewSession(type, id, item);
+            if (!gate.ok) {
                 return null;
             }
+            previewId = gate.sessionId;
         }
 
         let detailItems = nextItems;
@@ -720,7 +781,7 @@ export default function CareerLibraryScreen() {
 
         return detailItems;
     };
-    const handleClick = async (type, id, item) => {
+    const handleClick = async (type, id, item, { previewId: presetPreviewId } = {}) => {
         setLoading(true);
         setError('');
         setSelectedDetailSource(null);
@@ -774,7 +835,7 @@ export default function CareerLibraryScreen() {
             setSelectedCategory(item);
             setDetailReturnLevel('categories');
             const accessTier = String(item?.accessTier || '').toLowerCase();
-            setIsCategoryFree(hasFullAccess || accessTier === 'preview');
+            setIsCategoryFree(hasFullAccess || accessTier === 'preview' || accessTier === 'full');
             try {
                 const response = await getCareerLibraryNext(type, id);
                 const data = response ?? {};
@@ -786,7 +847,7 @@ export default function CareerLibraryScreen() {
                     setCurrentLevel('secondcategory');
                 }
                 else if (data.type === 'details') {
-                    const detailItems = await loadDetailItemsWithPreview({ type, id, item, nextItems });
+                    const detailItems = await loadDetailItemsWithPreview({ type, id, item, nextItems, presetPreviewId });
                     if (!detailItems) {
                         setLoading(false);
                         return;
@@ -826,7 +887,7 @@ export default function CareerLibraryScreen() {
                     setCurrentLevel('subcategory');
                 }
                 else if (data.type === 'details') {
-                    const detailItems = await loadDetailItemsWithPreview({ type, id, item, nextItems });
+                    const detailItems = await loadDetailItemsWithPreview({ type, id, item, nextItems, presetPreviewId });
                     if (!detailItems) {
                         setLoading(false);
                         return;
@@ -860,7 +921,7 @@ export default function CareerLibraryScreen() {
                 const data = response ?? {};
                 const nextItems = Array.isArray(data?.data) ? data.data : [];
                 if (data.type === 'details') {
-                    const detailItems = await loadDetailItemsWithPreview({ type, id, item, nextItems });
+                    const detailItems = await loadDetailItemsWithPreview({ type, id, item, nextItems, presetPreviewId });
                     if (!detailItems) {
                         setLoading(false);
                         return;
@@ -902,8 +963,39 @@ export default function CareerLibraryScreen() {
     // Global search / Career Bee: open the stream, category, subfield or specialization that was
     // picked, walking the same steps (and the same preview / lock checks) as tapping through the list.
     const openFromSearch = async () => {
-        const type = String(params.searchType || '').toLowerCase();
+        const searchedType = String(params.searchType || '').toLowerCase();
+        // A career-path hit's id is the career path's own id; its details live under its parent.
+        // Without a specialization it used to open nothing ("No details available"), so fall back to
+        // its second category, then its category (the same parent order the user portal uses).
+        const type = searchedType === 'careerpath' && !params.subCategoryId
+            ? (params.secondCategoryId ? 'secondcategory' : params.categoryId ? 'category' : searchedType)
+            : searchedType;
         const title = typeof params.searchTitle === 'string' ? params.searchTitle : '';
+        // A link must pass the same check as a tap, against the live access mode. Locked module ->
+        // unlock sheet. In preview the server only starts a preview for categories marked free, so
+        // anything under a locked category (2nd category, specialization, career detail) opens the
+        // unlock sheet instead of a page.
+        const access = Number.isFinite(resolvedModuleId) ? await checkModuleAccess(resolvedModuleId).catch(() => null) : null;
+        if (access && access.allowed === false) {
+            setModuleStatus('locked');
+            setHasFullAccess(false);
+            setCurrentLevel('streams');
+            setLockSheetDismissible(true);
+            setShowUnlockSheet(true);
+            return;
+        }
+        const liveMode = access?.allowed ? String(access.mode || '').toLowerCase() : '';
+        if (liveMode) {
+            setModuleStatus(liveMode);
+            setHasFullAccess(liveMode === 'full');
+        }
+        const full = routeFullAccess || liveMode === 'full' || (!liveMode && hasFullAccess);
+        const inPreview = !full && (liveMode ? liveMode === 'preview' : moduleStatus === 'preview');
+        // The server decides in preview; ok:false means the unlock sheet is already shown.
+        const previewGate = async (pageType, pageId, item) => {
+            if (!inPreview) return { ok: true, sessionId: null };
+            return createPreviewSession(pageType, pageId, item, { force: true });
+        };
         const sameId = (a, b) => a !== undefined && a !== null && b !== undefined && b !== null && String(a) === String(b);
         const listOf = (response) => (Array.isArray(response?.data) ? response.data : []);
         const findCategory = async (categoryId, streamIdHint) => {
@@ -926,7 +1018,7 @@ export default function CareerLibraryScreen() {
             }
             return null;
         };
-        const categoryIsFree = (category) => hasFullAccess || String(category?.accessTier || '').toLowerCase() === 'preview';
+        const categoryIsFree = (category) => full || ['preview', 'full'].includes(String(category?.accessTier || '').toLowerCase());
         const selectCategory = (category) => {
             setSelectedCategory(category);
             setIsCategoryFree(categoryIsFree(category));
@@ -937,7 +1029,8 @@ export default function CareerLibraryScreen() {
             setLockSheetDismissible(true);
             setShowUnlockSheet(true);
         };
-        const stepUnlocked = (item, category) => hasFullAccess || isUnlocked('career-library') || canAccessFreeDetail('career-library', getCareerAccessKey(item)) || categoryIsFree(category);
+        // In preview the server gate below decides; otherwise the same client checks as the list taps.
+        const stepUnlocked = (item, category) => full || inPreview || isUnlocked('career-library') || canAccessFreeDetail('career-library', getCareerAccessKey(item)) || categoryIsFree(category);
         if (type === 'stream') {
             const stream = streamItems.find((item) => sameId(item?.id, params.streamId || params.searchId)) || { id: Number(params.streamId || params.searchId), name: title };
             await handleClick('stream', stream.id, stream);
@@ -946,11 +1039,18 @@ export default function CareerLibraryScreen() {
         if (type === 'category') {
             const categoryId = params.categoryId || params.searchId;
             const category = await findCategory(categoryId, params.streamId);
-            if (!categoryIsFree(category)) {
+            const categoryItem = category || { id: Number(categoryId), title, name: title };
+            if (category ? !categoryIsFree(category) : !(full || inPreview)) {
                 showLocked(category ? 'categories' : 'streams');
                 return;
             }
-            await handleClick('category', categoryId, category || { id: Number(categoryId), title, name: title });
+            const gated = await previewGate('category', categoryId, categoryItem);
+            if (!gated.ok) {
+                setCurrentLevel(category ? 'categories' : 'streams');
+                return;
+            }
+            await handleClick('category', categoryId, categoryItem, { previewId: gated.sessionId });
+            if (inPreview) setIsCategoryFree(true);
             return;
         }
         const category = params.categoryId ? await findCategory(params.categoryId, params.streamId) : null;
@@ -973,11 +1073,17 @@ export default function CareerLibraryScreen() {
         if (type === 'secondcategory') {
             const secondId = params.secondCategoryId || params.searchId;
             const second = secondItem || { id: Number(secondId), name: title, title };
-            if (!stepUnlocked(second, category)) {
+            if ((category && !categoryIsFree(category)) || !stepUnlocked(second, category)) {
                 showLocked(secondItem ? 'secondcategory' : 'streams');
                 return;
             }
-            await handleClick('second', secondId, second);
+            const gated = await previewGate('second', secondId, second);
+            if (!gated.ok) {
+                setCurrentLevel(secondItem ? 'secondcategory' : 'streams');
+                return;
+            }
+            await handleClick('second', secondId, second, { previewId: gated.sessionId });
+            if (inPreview) setIsCategoryFree(true);
             return;
         }
         const subId = params.subCategoryId || (type === 'subcategory' ? params.searchId : '');
@@ -1001,11 +1107,17 @@ export default function CareerLibraryScreen() {
             }
         }
         const sub = subItem || { id: Number(subId), title, name: title };
-        if (!stepUnlocked(sub, category)) {
+        if ((category && !categoryIsFree(category)) || !stepUnlocked(sub, category)) {
             showLocked(subItem ? 'subcategory' : 'streams');
             return;
         }
-        await handleClick('sub', subId, sub);
+        const gated = await previewGate('sub', subId, sub);
+        if (!gated.ok) {
+            setCurrentLevel(subItem ? 'subcategory' : 'streams');
+            return;
+        }
+        await handleClick('sub', subId, sub, { previewId: gated.sessionId });
+        if (inPreview) setIsCategoryFree(true);
     };
     useSearchDeepLink(params.searchKey, moduleAccessReady && !loading, () => {
         void openFromSearch();
@@ -1048,11 +1160,13 @@ export default function CareerLibraryScreen() {
     </View>);
     const renderCategoryGrid = (items) => (<View className="gap-3">
       {items.map((item, index) => {
+            // Same rule as the user portal: a category is free unless the server marks it "locked"
+            // (the server sends "full", "preview" or "locked").
             const accessTier = String(item?.accessTier || '').toLowerCase();
-            const unlockedItem = hasFullAccess || accessTier === 'preview';
+            const unlockedItem = hasFullAccess || accessTier !== 'locked';
             return (<StaggerFadeUpItem key={`category-${item?.id ?? index}`} index={index}>
           <Pressable onPress={() => {
-                    if (!hasFullAccess && accessTier !== 'preview') {
+                    if (!hasFullAccess && accessTier === 'locked') {
                         setLockSheetDismissible(true);
                         setShowUnlockSheet(true);
                         return;
@@ -1067,8 +1181,9 @@ export default function CareerLibraryScreen() {
               {getCardDescription(item) ? (<Text numberOfLines={1} className={`mt-0.5 text-[12px] leading-4 ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{getCardDescription(item)}</Text>) : null}
             </View>
             <View className="items-end gap-2">
-              <View className="rounded-full px-2 py-1" style={{ backgroundColor: unlockedItem ? `${palette.green}14` : '#f8e8d8' }}>
-                  <Text className="text-[10px] font-black" style={{ color: unlockedItem ? palette.green : palette.primary }}>{unlockedItem ? 'FREE' : 'LOCK'}</Text>
+              {/* Same badge as the user portal's category cards: green open lock = open, red lock = locked. */}
+              <View className="h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: unlockedItem ? '#dcfce7' : '#fee2e2' }}>
+                  <Ionicons name={unlockedItem ? 'lock-open-outline' : 'lock-closed-outline'} size={16} color={unlockedItem ? '#15803d' : '#b91c1c'}/>
                 </View>
               <Ionicons name="chevron-forward" size={18} color={palette.primary}/>
             </View>

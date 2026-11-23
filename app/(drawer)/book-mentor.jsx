@@ -11,6 +11,7 @@ import { mentors, palette } from '../../src/careermap-data';
 import { AnimatedPressable, HierarchyFilterPanel, Pill, Screen, SectionHeader, UnlockBottomSheet } from '../../src/careermap-ui';
 import { openSubscriptionPrompt } from '../../src/subscription-flow';
 import { useSearchDeepLink } from '../../src/utils/searchNavigation';
+import { buildFreeKeys, isPreviewFree, sortMentorsNewestFirst } from '../../src/utils/previewAccess';
 
 import { openRazorpayCheckout } from '../../src/utils/razorpay';
 const getMentorInitials = (mentor) => {
@@ -187,8 +188,16 @@ const [resolvedModuleId, setResolvedModuleId] = useState(() => {
     const celebration = useRef(new Animated.Value(0)).current;
     const fallbackMentor = selectedMentorId ? mentorList.find((item) => String(item.id) === String(selectedMentorId)) || null : null;
     const activeMentor = selectedMentor || fallbackMentor;
-    const detailUnlocked = activeMentor ? canAccessFreeDetail('book-mentor', activeMentor.name) : true;
-    const hasFullAccess = moduleAccessMode === 'full';
+    const hasFullAccess = moduleAccessMode === 'full' || moduleAccessMode === 'unlocked';
+    // Plan features can unlock mentors too (same as the portal's frontend unlock).
+    const mentorsUnlocked = hasFullAccess || isUnlocked('book-mentor');
+    // In preview the free mentors are the first ones of the FULL list (newest first), not of
+    // whatever the domain filter currently shows, so filtering never unlocks a mentor.
+    const previewFreeKeys = useMemo(() => buildFreeKeys(sortMentorsNewestFirst(mentorList)), [mentorList]);
+    const isMentorFree = (mentor) => mentorsUnlocked || isPreviewFree(previewFreeKeys, mentor);
+    const detailUnlocked = activeMentor
+        ? isPreviewFree(previewFreeKeys, activeMentor) || canAccessFreeDetail('book-mentor', activeMentor.name)
+        : true;
     const modulePreviewBanner = !isUnlocked('book-mentor') && moduleAccessPreview;
     const selectedDateDisplay = formatDisplayDate(selectedDate);
     const selectedTimeDisplay = selectedSlot || 'Not selected';
@@ -310,13 +319,14 @@ const searchableCategoryOptions = useMemo(() => {
 }, [categoryOptions, categorySearchQuery]);
 
 const filteredMentors = useMemo(() => {
-    if (categoryFilter === 'All') return mentorList;
+    // Default order: newest first (the free mentors are worked out in the same order).
+    if (categoryFilter === 'All') return sortMentorsNewestFirst(mentorList);
 
     const selectedOption = categoryOptions.find(
         (opt) => String(opt.value) === String(categoryFilter)
     );
 
-    return mentorList.filter((mentor) => {
+    return sortMentorsNewestFirst(mentorList.filter((mentor) => {
         const mentorCategoryId =
             mentor?.category?.id ?? mentor?.category?._id ?? mentor?.category_id ?? mentor?.categoryId;
         const mentorCategoryName =
@@ -327,7 +337,7 @@ const filteredMentors = useMemo(() => {
             (selectedOption && mentorCategoryName &&
                 mentorCategoryName.toLowerCase() === selectedOption.label.toLowerCase())
         );
-    });
+    }));
 }, [mentorList, categoryFilter, categoryOptions]);
     useEffect(() => {
         if (mentorList.length === 0) {
@@ -345,7 +355,8 @@ const filteredMentors = useMemo(() => {
 
         const loadMentors = async () => {
             try {
-                const response = await getMentors();
+                // Inactive mentors are hidden (same as the portal).
+                const response = (await getMentors()).filter((mentor) => mentor?.raw?.status !== false);
                 if (isMounted && response.length > 0) {
                     setMentorList(response);
                 }
@@ -422,20 +433,37 @@ const filteredMentors = useMemo(() => {
             setSelectedSlot('');
         }
     }, [bookedSlotKeys, selectedSlot]);
+    // A mentor opened from a link / route param follows the same lock as the list: a locked
+    // mentor shows the unlock sheet instead of the profile.
+    const handledMentorParamRef = useRef('');
     useEffect(() => {
-        if (typeof params.selected === 'string' || typeof params.id === 'string') {
-            setSelectedMentorId(String(params.selected || params.id));
+        const mentorParam = typeof params.selected === 'string' ? params.selected : typeof params.id === 'string' ? params.id : '';
+        if (!mentorParam || !moduleAccessResolved || !mentorsLoaded) {
+            return;
         }
-    }, [params.id, params.selected]);
+        if (handledMentorParamRef.current === mentorParam) {
+            return;
+        }
+        handledMentorParamRef.current = mentorParam;
+        if (!moduleAccessAllowed) {
+            return;
+        }
+        const mentor = mentorList.find((item) => String(item.id) === mentorParam);
+        if (!mentor || !isMentorFree(mentor)) {
+            setShowUnlockSheet(true);
+            return;
+        }
+        setSelectedMentorId(String(mentor.id));
+    }, [params.id, params.selected, moduleAccessResolved, mentorsLoaded, moduleAccessAllowed, mentorList, previewFreeKeys, mentorsUnlocked]);
     // Global search / Career Bee: open the mentor's profile with the same rule as the list
-    // (full access, or one of the first four free cards); otherwise show the unlock sheet.
+    // (full access, or one of the 4 free mentors); otherwise show the unlock sheet.
     useSearchDeepLink(params.searchKey, moduleAccessResolved && mentorsLoaded, () => {
         const mentorId = typeof params.mentorId === 'string' ? params.mentorId : '';
         const index = mentorList.findIndex((mentor) => String(mentor.id) === mentorId);
         if (!mentorId || !moduleAccessAllowed || index === -1) {
             return;
         }
-        if (!(hasFullAccess || index < 4)) {
+        if (!isMentorFree(mentorList[index])) {
             setShowUnlockSheet(true);
             return;
         }
@@ -1185,7 +1213,8 @@ const filteredMentors = useMemo(() => {
 )}
             <View className="gap-3">
                 {filteredMentors.map((mentor, index) => {
-                    const cardUnlocked = hasFullAccess || index < 4;
+                    // Preview: exactly the 4 free mentors are unlocked (see previewFreeKeys).
+                    const cardUnlocked = isMentorFree(mentor);
                     return (
                         <Pressable key={mentor.id || mentor.name} className={`flex-row items-center gap-3 rounded-[22px] border p-4 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`} onPress={() => {
                             if (!cardUnlocked) {

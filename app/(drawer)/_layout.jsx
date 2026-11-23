@@ -68,7 +68,9 @@ export default function DrawerRoot() {
                 pathname: config.path,
                 params: {
                     moduleId: String(moduleId),
-                    accessStatus: access.freePreview ? 'preview' : 'unlocked',
+                    // The server answers with `mode` ("full" | "preview"); it has no `freePreview` field, so
+                    // every menu entry used to open as fully unlocked, even in preview.
+                    accessStatus: String(access?.mode || '').toLowerCase() === 'preview' ? 'preview' : 'unlocked',
                 },
             });
         } catch (error) {

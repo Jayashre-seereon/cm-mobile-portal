@@ -554,17 +554,9 @@ export default function HomeScreen() {
     }
 
     if (isAssessmentModule) {
+      // Psychometric assessment ALWAYS opens its landing screen (even when locked):
+      // that screen shows past reports and its own "buy a plan to (re)take" prompt.
       const explicitStatus = String(card?.accessStatus || '').toLowerCase();
-
-      if (explicitStatus === 'locked') {
-        setLockedModule({
-          title: card.title,
-          route: card.route,
-          moduleId,
-          message: 'This module is locked. Please purchase a subscription to continue accessing this module.',
-        });
-        return;
-      }
 
       router.push({
         pathname: card.route,
@@ -593,7 +585,7 @@ export default function HomeScreen() {
         pathname: card.route,
         params: {
           moduleId: String(moduleId),
-          accessStatus: response?.freePreview ? 'preview' : 'unlocked',
+          accessStatus: String(response?.mode || '').toLowerCase() === 'preview' ? 'preview' : 'unlocked',
         },
       });
     } catch (error) {

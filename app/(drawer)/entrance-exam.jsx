@@ -9,7 +9,8 @@ import { checkModuleAccess, getModules } from '../../src/api/moduleAccessApi';
 import { AnimatedPressable, Screen, SectionHeader, UnlockBottomSheet } from '../../src/careermap-ui';
 import { openSubscriptionPrompt } from '../../src/subscription-flow';
 import { useSearchDeepLink } from '../../src/utils/searchNavigation';
-import { isComingSoonDeadline } from '../../src/utils/deadlineStatus';
+import { getDeadlineStatus, isComingSoonDeadline } from '../../src/utils/deadlineStatus';
+import { buildFreeKeys, isPreviewFree } from '../../src/utils/previewAccess';
 const normalizeExamName = (value = '') => String(value).toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
 const getExamFamily = (value = '') => {
     const normalized = normalizeExamName(value);
@@ -22,10 +23,13 @@ export default function EntranceExamScreen() {
     const [entranceExams, setEntranceExams] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
-    const [hasFullAccess, setHasFullAccess] = useState(false);
+    // Server access mode: "full" / "unlocked" = everything open, "preview" = first 4 free,
+    // "locked" = everything locked.
+    const [accessMode, setAccessMode] = useState('preview');
     const [moduleAccessResolved, setModuleAccessResolved] = useState(false);
     const [showUnlockSheet, setShowUnlockSheet] = useState(false);
-  const [modeFilter, setModeFilter] = useState('All'); 
+  const [modeFilter, setModeFilter] = useState('All');
+  const [statusFilter, setStatusFilter] = useState('All');
    const [categoryFilter, setCategoryFilter] = useState('All');
     const [categories, setCategories] = useState([]);
     const [showModeDropdown, setShowModeDropdown] = useState(false);
@@ -99,7 +103,7 @@ const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
                 if (!Number.isFinite(moduleId)) {
                     if (isMounted) {
-                        setHasFullAccess(true);
+                        setAccessMode('full');
                         setModuleAccessResolved(true);
                     }
                     return;
@@ -110,11 +114,16 @@ const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
                     return;
                 }
 
-                setHasFullAccess(String(response?.mode || '').toLowerCase() === 'full' && response?.allowed !== false);
+                const mode = String(response?.mode || '').toLowerCase();
+                if (mode === 'full' || mode === 'unlocked') {
+                    setAccessMode(response?.allowed === false ? 'locked' : 'full');
+                } else {
+                    setAccessMode(mode === 'locked' ? 'locked' : 'preview');
+                }
                 setModuleAccessResolved(true);
             } catch (_error) {
                 if (isMounted) {
-                    setHasFullAccess(true);
+                    setAccessMode('full');
                     setModuleAccessResolved(true);
                 }
             }
@@ -127,13 +136,26 @@ const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
         };
     }, []);
 
+    const hasFullAccess = accessMode === 'full';
+    // The free exams in preview are the first 4 of the FULL list in API order, not of whatever
+    // the filters currently show, so filtering never unlocks an exam.
+    const previewFreeKeys = useMemo(() => buildFreeKeys(entranceExams), [entranceExams]);
+    const isExamUnlocked = (exam) =>
+        hasFullAccess || (accessMode === 'preview' && isPreviewFree(previewFreeKeys, exam));
+
     // Global search / Career Bee: pre-select the exam with the screen's own "Search Exam" filter.
-    useSearchDeepLink(params.searchKey, !isLoading, () => {
+    useSearchDeepLink(params.searchKey, !isLoading && moduleAccessResolved, () => {
         const examId = typeof params.examId === 'string' ? params.examId : '';
         if (!examId || !entranceExams.some((exam) => String(exam.id) === examId)) {
             return;
         }
         if (params.fromGlobalSearch === '1') {
+            // A deep link respects the same lock as the list.
+            const target = entranceExams.find((exam) => String(exam.id) === examId);
+            if (!isExamUnlocked(target)) {
+                setShowUnlockSheet(true);
+                return;
+            }
             router.replace({
                 pathname: '/(drawer)/entrance-exam-detail',
                 params: { examId, fromGlobalSearch: '1' },
@@ -141,14 +163,51 @@ const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
             return;
         }
         setModeFilter('All');
+        setStatusFilter('All');
         setCategoryFilter('All');
         const selected = entranceExams.find((exam) => String(exam.id) === examId);
         setSelectedExamId(String(selected.id));
         setShowFilters(true);
     });
 
-  const modeOptions = useMemo(() => ['All', ...new Set(entranceExams.map((exam) => String(exam.mode || '').trim()).filter(Boolean))], [entranceExams]);
-   
+  // Faceted filtering (same as the user portal): every dropdown only offers values that still have
+  // results once the OTHER filters are applied, so no combination ends in "no exams".
+  const matchesExamFilters = (exam, f) => {
+    if (f.mode !== 'All' && normalizeExamName(exam.mode) !== normalizeExamName(f.mode)) return false;
+    if (f.category !== 'All') {
+        const inCategory = [exam.categoryObj?.id ?? exam.categoryId, exam.secondcategoryObj?.id ?? exam.secondcategoryId, exam.subcategoryObj?.id ?? exam.subcategoryId]
+            .some((id) => id != null && String(id) === String(f.category));
+        if (!inCategory) return false;
+    }
+    if (f.status !== 'All') {
+        const closed = getDeadlineStatus(exam.lastDateRaw) === 'Expired';
+        if ((f.status === 'closed') !== closed) return false;
+    }
+    if (f.examId && String(exam.id) !== String(f.examId)) return false;
+    return true;
+  };
+  const currentExamFilters = { mode: modeFilter, category: categoryFilter, status: statusFilter, examId: selectedExamId };
+
+  const modeOptions = useMemo(() => {
+    const available = entranceExams.filter((exam) => matchesExamFilters(exam, { ...currentExamFilters, mode: 'All' }));
+    const unique = new Map();
+    available.forEach((exam) => {
+        const value = String(exam.mode || '').trim();
+        if (value && value !== 'Mode not available' && !unique.has(value.toLowerCase())) unique.set(value.toLowerCase(), value);
+    });
+    return ['All', ...unique.values()];
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entranceExams, categoryFilter, statusFilter, selectedExamId]);
+
+  const statusOptions = useMemo(() => {
+    const available = entranceExams.filter((exam) => matchesExamFilters(exam, { ...currentExamFilters, status: 'All' }));
+    const options = ['All'];
+    if (available.some((exam) => getDeadlineStatus(exam.lastDateRaw) !== 'Expired')) options.push('upcoming');
+    if (available.some((exam) => getDeadlineStatus(exam.lastDateRaw) === 'Expired')) options.push('closed');
+    return options;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entranceExams, categoryFilter, modeFilter, selectedExamId]);
+
 function getOptionValue(option) {
     return String(option?.value ?? option?.id ?? option?.label ?? option ?? '');
 }
@@ -156,8 +215,17 @@ function getOptionLabel(option) {
     return String(option?.label ?? option?.title ?? option?.name ?? option ?? '');
 }
 const categoryOptions = useMemo(() => {
-    return Array.isArray(categories) ? categories : [];
-}, [categories]);
+    const all = Array.isArray(categories) ? categories : [];
+    const available = entranceExams.filter((exam) => matchesExamFilters(exam, { ...currentExamFilters, category: 'All' }));
+    const ids = new Set(available.flatMap((exam) =>
+        [exam.categoryObj?.id ?? exam.categoryId, exam.secondcategoryObj?.id ?? exam.secondcategoryId, exam.subcategoryObj?.id ?? exam.subcategoryId]
+            .filter((id) => id != null)
+            .map(String)
+    ));
+    // Keep the current selection listed even if it is the only thing narrowing the list.
+    return all.filter((option) => ids.has(getOptionValue(option)) || getOptionValue(option) === String(categoryFilter));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [categories, entranceExams, modeFilter, statusFilter, selectedExamId, categoryFilter]);
    const searchableExams = useMemo(() => {
     const query = normalizeExamName(examSearchQuery.trim());
     if (!query) return entranceExams;
@@ -174,37 +242,11 @@ const searchableCategoryOptions = useMemo(() => {
 }, [categoryOptions, categorySearchQuery]);
 
 
-const filtered = useMemo(() => {
-    let source = [...entranceExams];
-
-    // Mode filter
-    if (modeFilter !== 'All') {
-        source = source.filter(
-            (exam) =>
-                normalizeExamName(exam.mode) === normalizeExamName(modeFilter)
-        );
-    }
-
-    // Category filter
-    if (categoryFilter !== 'All') {
-        source = source.filter(
-            (exam) =>
-                String(exam.categoryId ?? exam.categoryObj?.id) === String(categoryFilter)
-        );
-    }
-
-    // Selected exam
-    if (selectedExamId) {
-        source = source.filter((exam) => String(exam.id) === String(selectedExamId));
-    }
-
-    return source;
-}, [
-    entranceExams,
-    modeFilter,
-    categoryFilter,
-    selectedExamId,
-]);
+const filtered = useMemo(
+    () => entranceExams.filter((exam) => matchesExamFilters(exam, currentExamFilters)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [entranceExams, modeFilter, categoryFilter, statusFilter, selectedExamId]
+);
    useEffect(() => {
     if (
         categoryFilter !== 'All' &&
@@ -475,11 +517,42 @@ setShowCategoryDropdown(false);
     ) : null}
 
 </View>
+
+{/* Upcoming / Closed (same as the user portal "All Status" filter) */}
+<View className="flex-row gap-2">
+    {statusOptions.map((status) => (
+        <Pressable
+            key={status}
+            onPress={() => setStatusFilter(status)}
+            className={`flex-1 items-center rounded-[14px] border px-3 py-3 ${
+                status === statusFilter
+                    ? 'border-brand bg-[#fdf0ee]'
+                    : preferences.darkMode
+                        ? 'border-[#1a1a1a] bg-[#080808]'
+                        : 'border-line bg-card'
+            }`}
+        >
+            <Text
+                className={`text-[13px] font-semibold ${
+                    status === statusFilter
+                        ? 'text-brand'
+                        : preferences.darkMode
+                            ? 'text-white'
+                            : 'text-ink'
+                }`}
+            >
+                {status === 'All' ? 'All Status' : status === 'upcoming' ? 'Upcoming' : 'Closed'}
+            </Text>
+        </Pressable>
+    ))}
+</View>
 {(modeFilter !== 'All' ||
     categoryFilter !== 'All' ||
+    statusFilter !== 'All' ||
     selectedExamId) ? (    <Pressable
         onPress={() => {
             setModeFilter('All');
+            setStatusFilter('All');
             setCategoryFilter('All');
             setSelectedExamId('');
             setExamSearchQuery('');
@@ -503,8 +576,8 @@ setShowCategoryDropdown(false);
 
                 {!moduleAccessResolved ? <Text className={`text-[14px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Checking access...</Text> : null}
 
-                {filtered.map((exam, index) => {
-                    const cardUnlocked = hasFullAccess || index < 4;
+                {filtered.map((exam) => {
+                    const cardUnlocked = isExamUnlocked(exam);
                     return (
                     <AnimatedPressable
                         key={exam.id}
@@ -561,7 +634,7 @@ setShowCategoryDropdown(false);
                                                 setShowUnlockSheet(true);
                                                 return;
                                             }
-                                            if (exam.website) Linking.openURL(exam.website);
+                                            if (exam.website && exam.website !== '#') Linking.openURL(exam.website);
                                         }}
                                         className="rounded-full px-2 py-1.5"
                                     >
