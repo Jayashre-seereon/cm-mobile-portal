@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Image, Linking, Pressable, ScrollView, Text, View } from 'react-native';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { getNewsletters } from '../../src/api/newsletterApi';
 import { checkModuleAccess, getModules } from '../../src/api/moduleAccessApi';
@@ -9,9 +9,22 @@ import { Screen, UnlockBottomSheet, mobileAssistantScrollProps } from '../../src
 import { palette } from '../../src/careermap-data';
 import { openSubscriptionPrompt } from '../../src/subscription-flow';
 import { useSearchDeepLink } from '../../src/utils/searchNavigation';
+import { buildFreeKeys, getPreviewLimit, isPreviewFree, PREVIEW_MODULES } from '../../src/utils/previewAccess';
 
 const stripHtml = (value) => String(value || '').replace(/<[^>]*>/g, '').trim();
 const getViewUrl = (item) => String(item?.image || item?.url || '').trim();
+
+// "PDF" / "Image" / ... label shown on each card (same as the user portal).
+function getFileKindLabel(url) {
+  const clean = String(url || '').split('?')[0].toLowerCase();
+  if (/\.(pdf)$/.test(clean)) return 'PDF';
+  if (/\.(jpg|jpeg|png|webp|svg|gif)$/.test(clean)) return 'Image';
+  if (/\.(doc|docx)$/.test(clean)) return 'Document';
+  if (/\.(ppt|pptx)$/.test(clean)) return 'Presentation';
+  if (/\.(xls|xlsx)$/.test(clean)) return 'Spreadsheet';
+  if (/\.(mp4|webm|mov|ogg)$/.test(clean)) return 'Video';
+  return 'File';
+}
 
 // Normalize whatever the API/route gives us into one of: 'preview' | 'locked' | 'full'
 // 'unlocked' is treated as an alias for 'full'.
@@ -26,7 +39,7 @@ function normalizeMode(rawMode, allowed) {
 }
 
 export default function NewsletterScreen() {
-  const { preferences } = useAppState();
+  const { preferences, isUnlocked } = useAppState();
   const params = useLocalSearchParams();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -36,9 +49,10 @@ export default function NewsletterScreen() {
   const [resolvedAccessStatus, setResolvedAccessStatus] = useState('locked');
   const [showUnlockSheet, setShowUnlockSheet] = useState(false);
   const accessStatus = resolvedAccessStatus;
-  const isPreview = accessStatus === 'preview';
-  const isLocked = accessStatus === 'locked';
-  const hasFullAccess = accessStatus === 'full';
+  // Same as the user portal: full access = the server says so OR the user has an active plan for it.
+  const hasFullAccess = accessStatus === 'full' || isUnlocked('newsletter');
+  const isPreview = accessStatus === 'preview' && !hasFullAccess;
+  const isLocked = accessStatus === 'locked' && !hasFullAccess;
 
   useEffect(() => {
     let mounted = true;
@@ -63,10 +77,7 @@ export default function NewsletterScreen() {
         const response = await checkModuleAccess(moduleId);
         if (!mounted) return;
         setResolvedAccessStatus(normalizeMode(response?.mode, response?.allowed));
-        const limit = Number(response?.previewItemLimit);
-        if (mounted && Number.isFinite(limit) && limit > 0) {
-          setPreviewLimit(limit);
-        }
+        setPreviewLimit(getPreviewLimit(PREVIEW_MODULES.newsletter, response));
       } catch {
         if (mounted) setResolvedAccessStatus('locked');
       }
@@ -89,7 +100,8 @@ export default function NewsletterScreen() {
         const response = await getNewsletters();
         const nextItems = Array.isArray(response?.data) ? response.data : [];
         if (mounted) {
-          setItems(nextItems);
+          // Newest first (the free items in preview are worked out in the same order).
+          setItems([...nextItems].sort((a, b) => new Date(b?.createdAt) - new Date(a?.createdAt)));
         }
       } catch (_err) {
         if (mounted) {
@@ -109,12 +121,15 @@ export default function NewsletterScreen() {
       mounted = false;
     };
   }, []);
+  // The free newsletters in preview are the newest ones of the FULL list, not of whatever the
+  // type filter shows, so filtering never unlocks an item.
+  const previewFreeKeys = useMemo(() => buildFreeKeys(items, previewLimit), [items, previewLimit]);
 const filteredItems =
   selectedType === "ALL"
     ? items
     : items.filter((item) => item.type === selectedType);
-  // Global search / Career Bee: show the picked article first; its lock still follows its
-  // position in the normal list.
+  // Global search / Career Bee: show the picked article first; its lock still follows the
+  // full list's free items.
   const searchFocusActive = useSearchDeepLink(params?.searchKey, !loading, () => {
     if (typeof params?.newsletterId === 'string' && params.newsletterId) {
       setSelectedType("ALL");
@@ -188,11 +203,10 @@ const filteredItems =
   ))}
 </View>
           {displayedItems.map((item) => {
-            const index = filteredItems.indexOf(item);
             // full mode -> everything unlocked
-            // preview mode -> only the first `previewLimit` items unlocked, rest locked
+            // preview mode -> only the first `previewLimit` items of the full list unlocked
             // locked mode -> nothing unlocked
-            const cardUnlocked = hasFullAccess || (isPreview && index < previewLimit);
+            const cardUnlocked = hasFullAccess || (isPreview && isPreviewFree(previewFreeKeys, item));
             const viewUrl = getViewUrl(item);
             const externalUrl = String(item?.url || '').trim();
             const returnTarget = {
@@ -215,6 +229,7 @@ const filteredItems =
             >
               <View className="flex-row items-start justify-between gap-3 p-4 pb-3">
                 <View className="flex-1 gap-2">
+                  <Text className="text-[10px] font-bold uppercase" style={{ color: '#b8837e', letterSpacing: 2 }}>Career Insights</Text>
                   <Text className={`text-[16px] font-black ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{item?.title || 'Newsletter'}</Text>
                   {item?.description ? (
                     <Text className={`text-[13px] leading-5 ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>
@@ -222,8 +237,13 @@ const filteredItems =
                     </Text>
                   ) : null}
                 </View>
-                <View className="h-6 w-6 items-center justify-center rounded-full" style={{ backgroundColor: `${cardUnlocked ? palette.green : '#e53935'}18` }}>
-                  <Ionicons name={cardUnlocked ? 'lock-open' : 'lock-closed'} size={13} color={cardUnlocked ? palette.green : '#e53935'} />
+                <View className="items-end gap-2">
+                  <View className="h-9 w-9 items-center justify-center rounded-full" style={{ backgroundColor: cardUnlocked ? '#ecfdf3' : '#f8e8d8' }}>
+                    <Ionicons name={cardUnlocked ? 'lock-open' : 'lock-closed'} size={16} color={cardUnlocked ? '#16a34a' : palette.primary} />
+                  </View>
+                  <View className="rounded-full px-3 py-1" style={{ backgroundColor: '#fdf0ee' }}>
+                    <Text className="text-[8px] font-bold uppercase" style={{ color: palette.primary, letterSpacing: 1.5 }}>{getFileKindLabel(item?.image || item?.url)}</Text>
+                  </View>
                 </View>
               </View>
            <View className="flex-row flex-wrap items-center justify-between px-4 pb-4">
@@ -242,15 +262,8 @@ const filteredItems =
                     className="rounded-full px-4 py-2"
                     style={{ backgroundColor: palette.primary }}
                   >
-                    <Text className="text-[12px] font-bold text-white">URL</Text>
+                    <Text className="text-[12px] font-bold text-white">Open Link</Text>
                   </Pressable>
-                ) : null}
-                {!cardUnlocked ? (
-                  <View className="rounded-[12px] bg-[#f8e8d8] px-3 py-2">
-                    <Text className="text-[11px] font-bold" style={{ color: palette.primary }}>
-                      Locked item
-                    </Text>
-                  </View>
                 ) : null}
               </View>
             </Pressable>

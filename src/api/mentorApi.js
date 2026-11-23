@@ -139,6 +139,8 @@ export function mapMentorItem(item, index = 0) {
 
   return {
     id: String(item?.id ?? `mentor-${index}`),
+    // kept so "newest first" (preview free mentors) sorts by date, like the user portal
+    createdAt: item?.createdAt || item?.created_at || null,
     name,
     specialty: item?.designation || item?.specialty || item?.category || 'Career Guidance',
     rating: item?.rank ? String(item.rank) : '0',

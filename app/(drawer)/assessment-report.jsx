@@ -24,7 +24,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuthStore } from '../../src/store/auth-store';
 import { getAttemptResult } from '../../src/api/psychometricAssessmentApi';
-import { CLUSTERS, pct } from '../../src/features/assessment/data/careerCompassData';
+import { CLUSTERS, INTERP, pct } from '../../src/features/assessment/data/careerCompassData';
+import { formatPhone } from '../../src/utils/auth';
 import { SAMPLE_PROFILING_REPORT } from '../../src/features/assessment/data/assessmentConstants';
 import YourProfilingReport from '../../src/features/assessment/components/YourProfilingReport';
 
@@ -1087,32 +1088,39 @@ const totalH = 32 * (PAGE_H + PAGE_GAP);
   const rawData = reportData || {};
   const report = rawData.report || {};
   const student = report.student || {};
-  const studentName = student.name || rawData.studentName || user?.name || 'Aryaman Singh';
-  const studentFirstName = studentName.split(' ')[0] || 'Aryaman';
-  const studentClass = student.class || rawData.className || user?.selectedClass || '10th';
-  const studentSchool = student.school || rawData.school || user?.school || 'DAV, Pokhariput, BBSR';
-  const yourProfiling = report.yourProfiling || rawData.yourProfiling || rawData.report?.yourProfiling || SAMPLE_PROFILING_REPORT;
-  const studentEmail = student.email || rawData.email || user?.email || 'aryaman1012@gmail.com';
-  const studentPhone = student.phone || rawData.phone || user?.mobile || '+91-88958 12485';
-  const completedDate = student.completedAt || rawData.completedAt || '2025-11-26T10:00:00.000Z';
+  // Sample/demo values are only for the 'demo' report. A real report with a missing value shows
+  // blank/zero instead of someone else's sample data (same as the user portal).
+  const isDemo = attemptId === 'demo';
+  const studentName = student.name || rawData.studentName || user?.name || (isDemo ? 'Aryaman Singh' : 'Student');
+  const studentFirstName = studentName.split(' ')[0] || (isDemo ? 'Aryaman' : 'Student');
+  const studentClass = student.class || rawData.className || user?.selectedClass || (isDemo ? '10th' : '-');
+  const studentSchool = student.school || rawData.school || user?.school || (isDemo ? 'DAV, Pokhariput, BBSR' : '-');
+  const yourProfiling = report.yourProfiling || rawData.yourProfiling || rawData.report?.yourProfiling || (isDemo ? SAMPLE_PROFILING_REPORT : null);
+  const studentEmail = student.email || rawData.email || user?.email || (isDemo ? 'aryaman1012@gmail.com' : '-');
+  const studentPhone = student.phone || rawData.phone || user?.mobile || (isDemo ? '+91-88958 12485' : '-');
+  const completedDate = student.completedAt || rawData.completedAt || rawData.createdAt || (isDemo ? '2025-11-26T10:00:00.000Z' : '');
 
-  const formattedDate = new Date(completedDate).toLocaleDateString('en-GB', {
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric',
-  });
+  // No date from the server -> "-" (never today's date, which would look like a real result).
+  const parsedCompletedDate = completedDate ? new Date(completedDate) : null;
+  const formattedDate = parsedCompletedDate && !Number.isNaN(parsedCompletedDate.getTime())
+    ? parsedCompletedDate.toLocaleDateString('en-GB', {
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric',
+    })
+    : '-';
 
-  const hollandCode = rawData.hollandCode || report.hollandProfile?.code || 'ECS';
+  const hollandCode = rawData.hollandCode || report.hollandProfile?.code || report.hollandCode || (isDemo ? 'ECS' : 'N/A');
   const scores = rawData.scores || {};
   const domains = report.domains || {};
 
   // Goal Orientation
   const goalObj = domains.goalOrientation || {};
-  const longPct = goalObj.longTerm?.percentage ?? (scores.goalLong != null ? pct(scores.goalLong) : 80);
-  const shortPct = goalObj.shortTerm?.percentage ?? (scores.goalShort != null ? pct(scores.goalShort) : 100);
+  const longPct = goalObj.longTerm?.percentage ?? (scores.goalLong != null ? pct(scores.goalLong) : (isDemo ? 80 : 0));
+  const shortPct = goalObj.shortTerm?.percentage ?? (scores.goalShort != null ? pct(scores.goalShort) : (isDemo ? 100 : 0));
 
   // Interests Scores (RIASEC)
-  const interestScoreMap = { E: 100, C: 95, S: 85, R: 80, I: 55, A: 55 };
+  const interestScoreMap = isDemo ? { E: 100, C: 95, S: 85, R: 80, I: 55, A: 55 } : { E: 0, C: 0, S: 0, R: 0, I: 0, A: 0 };
   const domainInterests = domains.interests || [];
   domainInterests.forEach((d) => {
     if (d.facet && (d.percentage != null || d.score != null)) {
@@ -1121,7 +1129,7 @@ const totalH = 32 * (PAGE_H + PAGE_GAP);
   });
 
   // Personality Scores (OCEAN)
-  const personScoreMap = { ES: 75, O: 63, Cn: 50, Ex: 50, Ag: 46 };
+  const personScoreMap = isDemo ? { ES: 75, O: 63, Cn: 50, Ex: 50, Ag: 46 } : { ES: 0, O: 0, Cn: 0, Ex: 0, Ag: 0 };
   const domainPerson = domains.personality || [];
   domainPerson.forEach((d) => {
     if (d.facet && (d.percentage != null || d.score != null)) {
@@ -1130,7 +1138,7 @@ const totalH = 32 * (PAGE_H + PAGE_GAP);
   });
 
   // Work Values Scores (Schwartz)
-  const valScoreMap = { OC: 100, SE: 95, ST: 60, CO: 56 };
+  const valScoreMap = isDemo ? { OC: 100, SE: 95, ST: 60, CO: 56 } : { OC: 0, SE: 0, ST: 0, CO: 0 };
   const domainValues = domains.values || [];
   domainValues.forEach((d) => {
     if (d.facet && (d.percentage != null || d.score != null)) {
@@ -1139,7 +1147,7 @@ const totalH = 32 * (PAGE_H + PAGE_GAP);
   });
 
   // Learning Styles Scores (VARK)
-  const varkScoreMap = { V: 100, Rd: 85, A: 75, K: 60 };
+  const varkScoreMap = isDemo ? { V: 100, Rd: 85, A: 75, K: 60 } : { V: 0, Rd: 0, A: 0, K: 0 };
   const domainVark = domains.learningStyles || [];
   domainVark.forEach((d) => {
     if (d.facet && (d.percentage != null || d.score != null)) {
@@ -1148,7 +1156,7 @@ const totalH = 32 * (PAGE_H + PAGE_GAP);
   });
 
   // Aptitude Scores (6 Core)
-  const aptScoreMap = { Verb: 43, Log: 33, Voc: 33, Mech: 33, Spat: 15, Num: 14 };
+  const aptScoreMap = isDemo ? { Verb: 43, Log: 33, Voc: 33, Mech: 33, Spat: 15, Num: 14 } : { Verb: 0, Log: 0, Voc: 0, Mech: 0, Spat: 0, Num: 0 };
   const domainApt = domains.aptitudes || [];
   domainApt.forEach((d) => {
     if (d.facet && (d.percentage != null || d.score != null)) {
@@ -1208,6 +1216,7 @@ const totalH = 32 * (PAGE_H + PAGE_GAP);
   ], varkScoreMap);
   const topLearningStyles = aboveMin(learningStyleScores);
 
+
   const topWorkValues = aboveMin(rankDomainFacets(domainValues, [
     { facet: 'OC', label: 'OPENNESS TO CHANGE' },
     { facet: 'SE', label: 'SELF-ENHANCEMENT' },
@@ -1244,13 +1253,24 @@ const totalH = 32 * (PAGE_H + PAGE_GAP);
 
   // Goal orientation: only the higher one
   const goalOrientationLabel = shortPct >= longPct ? 'SHORT TERM' : 'LONG TERM';
-  const goalOrientationSummary = shortPct >= longPct ? 'Short-Term' : 'Long-Term';
+  // Same rule as the user portal report.
+  const goalOrientationSummary = Math.abs(longPct - shortPct) <= 10 ? 'Balanced Planner' : (longPct > shortPct ? 'Long-Term' : 'Short-Term');
+
+  // Page 30 advice follows THIS student's result (same as the user portal): their highest
+  // learning style(s) with the matching study tips, and the text for their goal orientation.
+  const hasLearningScores = topLearningStyles.some((s) => s.score > 0);
+  const primaryLearningKey = hasLearningScores && ['V', 'A', 'Rd', 'K'].includes(topLearningStyles[0]?.facet) ? topLearningStyles[0].facet : null;
+  const studyStyleLabel = hasLearningScores ? topLearningStyles.slice(0, 2).map((s) => s.label).join(' / ') : '-';
+  const studyGoalLabel = goalOrientationSummary;
+  const studyTips = (primaryLearningKey && INTERP.learning_style?.[primaryLearningKey]?.tips) || [];
+  const goalOrientationKey = goalOrientationSummary === 'Balanced Planner' ? 'balanced' : goalOrientationSummary === 'Long-Term' ? 'long_term' : 'short_term';
+  const pathwayPoints = String(INTERP.goal_orientation?.[goalOrientationKey]?.text || '').split(/(?<=\.)\s+/).filter(Boolean);
 const bandLabelFor = (arr, facet, fallback = 'Moderate') => {
   const found = (arr || []).find((x) => x.facet === facet);
   return (found?.bandLabel || fallback).toUpperCase();
 };
-  // 5 Top Fallback clusters matching the PDF
-  const defaultTop5 = [
+  // Sample clusters: used ONLY for the 'demo' report.
+  const sampleTop5 = [
     {
       rank: 1,
       code: 'BIZ',
@@ -1374,6 +1394,20 @@ const bandLabelFor = (arr, facet, fallback = 'Moderate') => {
     },
   ];
 
+  // A real report never borrows the sample clusters: a cluster the server did not send shows as
+  // a neutral "Not available" (same as the user portal).
+  const emptyCluster = (rank) => ({
+    rank,
+    code: 'NA',
+    name: 'NOT AVAILABLE',
+    matchPercentage: 0,
+    description: 'Cluster recommendation not available for this report.',
+    why_fit: '',
+    streams_and_pathways_india: '',
+    careers: [],
+  });
+  const defaultTop5 = isDemo ? sampleTop5 : [1, 2, 3, 4, 5].map(emptyCluster);
+
   const rawTop5 = report.careerClusters?.top5 || rawData.top5Clusters || [];
   const clusterMap = (CLUSTERS || []).reduce((acc, c) => {
     acc[c.cluster_id] = c;
@@ -1386,7 +1420,7 @@ const bandLabelFor = (arr, facet, fallback = 'Moderate') => {
           const item = rawTop5[idx] || {};
           const code = item.code || item.cluster_id || item.clusterId || fallback.code;
           const meta =
-            clusterMap[code] || clusterMap[item.name || item.cluster] || CLUSTERS[idx % CLUSTERS.length] || {};
+            clusterMap[code] || clusterMap[item.name || item.cluster] || {};
           return {
             rank: idx + 1,
             code,
@@ -1945,7 +1979,7 @@ useEffect(() => {
               </View>
               <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
                 <Text style={{ ...webFont(14.5, 1.5), fontFamily: 'Poppins_400Regular', fontWeight: '400', color: '#374151' }}>Phone No:</Text>
-                <Text style={{ ...webFont(14.5, 1.5), fontFamily: 'Poppins_600SemiBold', fontWeight: '600', color: '#111827', marginLeft: 9.8, flexShrink: 1 }}>{studentPhone}</Text>
+                <Text style={{ ...webFont(14.5, 1.5), fontFamily: 'Poppins_600SemiBold', fontWeight: '600', color: '#111827', marginLeft: 9.8, flexShrink: 1 }}>{formatPhone(studentPhone) || studentPhone}</Text>
               </View>
             </View>
           </View>
@@ -3571,10 +3605,10 @@ useEffect(() => {
 
             <View style={{ flexDirection: 'column', gap: 8, marginBottom: 12, paddingBottom: 8, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' }}>
               <Text style={{ ...webFont(14, 20 / 14), fontFamily: 'Poppins_600SemiBold', fontWeight: '600', color: '#1E293B' }}>
-                Learning style: <Text style={{ fontFamily: 'Poppins_900Black', fontWeight: '900', color: '#1E232A' }}>{topLearningStyles[0]?.label}</Text>
+                Learning style: <Text style={{ fontFamily: 'Poppins_900Black', fontWeight: '900', color: '#1E232A' }}>{studyStyleLabel}</Text>
               </Text>
               <Text style={{ ...webFont(14, 20 / 14), fontFamily: 'Poppins_600SemiBold', fontWeight: '600', color: '#1E293B' }}>
-                Goal orientation: <Text style={{ fontFamily: 'Poppins_900Black', fontWeight: '900', color: '#1E232A' }}>{goalOrientationSummary}</Text>
+                Goal orientation: <Text style={{ fontFamily: 'Poppins_900Black', fontWeight: '900', color: '#1E232A' }}>{studyGoalLabel}</Text>
               </Text>
             </View>
 
@@ -3584,12 +3618,7 @@ useEffect(() => {
                   HOW TO STUDY, BASED ON HOW YOU LEARN
                 </Text>
                 <View style={{ gap: 2 }}>
-                  {[
-                    'Convert chapters into mind-maps, flowcharts and labelled diagrams.',
-                    'Use colour-coding for formulas, dates and key terms.',
-                    'Watch good video explanations, then redraw the idea from memory.',
-                    "Sit where you can clearly see the board and the teacher's demonstrations.",
-                  ].map((item) => (
+                  {studyTips.map((item) => (
                     <View key={item} style={{ flexDirection: 'row' }}>
                       <Text style={{ ...webFont(12, 1.625), width: 20, paddingRight: 7, textAlign: 'right', color: '#334155' }}>•</Text>
                       <Text style={{ ...webFont(12, 1.625), flex: 1, color: '#334155' }}>{item}</Text>
@@ -3603,10 +3632,7 @@ useEffect(() => {
                   YOUR PATHWAY APPROACH
                 </Text>
                 <View style={{ gap: 2 }}>
-                  {[
-                    "You're balanced between studying further and starting work early.",
-                    'A smart path: choose degree courses that include internships, apprenticeships or placement years — you earn experience while keeping the door open to higher studies.',
-                  ].map((item) => (
+                  {pathwayPoints.map((item) => (
                     <View key={item} style={{ flexDirection: 'row' }}>
                       <Text style={{ ...webFont(12, 1.625), width: 20, paddingRight: 7, textAlign: 'right', color: '#334155' }}>•</Text>
                       <Text style={{ ...webFont(12, 1.625), flex: 1, color: '#334155' }}>{item}</Text>

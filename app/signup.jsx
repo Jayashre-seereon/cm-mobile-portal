@@ -9,7 +9,7 @@ import { AnimatedBackground } from '../src/animated-background';
 import { palette } from '../src/careermap-data';
 import { AnimatedPressable } from '../src/careermap-ui';
 import { useAuthStore } from '../src/store/auth-store';
-import { formatOtpMobile, getEmailError, getPasswordError, isValidEmail, isValidPassword, normalizeMobile } from '../src/utils/auth';
+import { PASSWORD_POLICY_MESSAGE, formatOtpMobile, getEmailError, getMobileError, getNewPasswordError, isStrongPassword, isValidEmail, isValidMobileNumber, normalizeMobile } from '../src/utils/auth';
 export default function SignupScreen() {
     const { preferences } = useAppState();
     const setSignupForm = useAuthStore((state) => state.setSignupForm);
@@ -42,9 +42,9 @@ export default function SignupScreen() {
             case 'email':
                 return getEmailError(value);
             case 'mobile':
-                return value && normalizeMobile(value).length !== 10 ? 'Enter a valid 10 digit mobile number.' : '';
+                return getMobileError(value);
             case 'password':
-                return getPasswordError(value);
+                return getNewPasswordError(value);
             case 'confirmPassword':
                 return value && value !== nextForm.password ? 'Password and confirm password must match.' : '';
             default:
@@ -66,8 +66,8 @@ export default function SignupScreen() {
     const canRegister = Boolean(
         form.name.trim() &&
         isValidEmail(form.email) &&
-        normalizeMobile(form.mobile).length === 10 &&
-        isValidPassword(form.password) &&
+        isValidMobileNumber(form.mobile) &&
+        isStrongPassword(form.password) &&
         form.password === form.confirmPassword &&
         form.city.trim() &&
         form.state.trim(),
@@ -75,8 +75,8 @@ export default function SignupScreen() {
     const handleRegister = async () => {
         const nextErrors = {
             email: getEmailError(form.email),
-            mobile: form.mobile && normalizeMobile(form.mobile).length !== 10 ? 'Enter a valid 10 digit mobile number.' : '',
-            password: getPasswordError(form.password),
+            mobile: getMobileError(form.mobile),
+            password: getNewPasswordError(form.password),
             confirmPassword: form.password !== form.confirmPassword ? 'Password and confirm password must match.' : '',
         };
         setFieldErrors(nextErrors);
@@ -90,11 +90,11 @@ export default function SignupScreen() {
             return;
         }
         if (nextErrors.password) {
-            setStatus({ type: 'error', message: 'Password must be at least 6 characters.' });
+            setStatus({ type: 'error', message: PASSWORD_POLICY_MESSAGE });
             return;
         }
         if (nextErrors.mobile) {
-            setStatus({ type: 'error', message: 'Enter a valid 10 digit mobile number.' });
+            setStatus({ type: 'error', message: getMobileError(form.mobile) || 'Enter a valid 10 digit mobile number.' });
             return;
         }
         if (nextErrors.confirmPassword) {

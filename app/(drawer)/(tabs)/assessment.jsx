@@ -37,7 +37,6 @@ export default function AssessmentLandingScreen() {
   const [accessStatus, setAccessStatus] = useState(null);
   const [publishedAssessments, setPublishedAssessments] = useState([]);
   const [myAttempts, setMyAttempts] = useState([]);
-  const [activeAttempt, setActiveAttempt] = useState(null);
   const [latestCompletedAttempt, setLatestCompletedAttempt] = useState(null);
   const [showRetakeModal, setShowRetakeModal] = useState(false);
   const [showPlanRequiredModal, setShowPlanRequiredModal] = useState(false);
@@ -69,14 +68,8 @@ export default function AssessmentLandingScreen() {
           : [];
       setMyAttempts(attempts);
 
-      // Find in-progress attempt if any
-      const inProgress = attempts.find(
-        (a) =>
-          a.status === 'in_progress' ||
-          a.status === 'IN_PROGRESS' ||
-          a.isCompleted === false
-      );
-      setActiveAttempt(inProgress || null);
+      // Incomplete attempts are retained in history, but a fresh start creates
+      // a new attempt instead of resuming abandoned answers.
 
       // Find latest completed attempt
       const completed = attempts.filter(
@@ -87,7 +80,16 @@ export default function AssessmentLandingScreen() {
           a.report
       );
       if (completed.length > 0) {
-        setLatestCompletedAttempt(completed[0]);
+        const timeOf = (a) => {
+          const t = new Date(a.completedAt || a.updatedAt || a.createdAt || 0).getTime();
+          return Number.isNaN(t) ? 0 : t;
+        };
+        const sorted = [...completed].sort(
+          (a, b) =>
+            timeOf(b) - timeOf(a) ||
+            Number(b.id || b.attemptId || 0) - Number(a.id || a.attemptId || 0)
+        );
+        setLatestCompletedAttempt(sorted[0]);
       } else {
         setLatestCompletedAttempt(null);
       }
@@ -113,18 +115,9 @@ export default function AssessmentLandingScreen() {
     setShowPlanRequiredModal(true);
   }
 
-  async function handleStartTest(forceNew = false) {
-    // If in-progress test exists and not forcing new: resume directly
-    if (activeAttempt && !forceNew) {
-      const attemptId =
-        activeAttempt.id || activeAttempt.attemptId || activeAttempt._id;
-      router.push({
-        pathname: '/(drawer)/assessment-attempt',
-        params: { attemptId: String(attemptId) },
-      });
-      return;
-    }
-
+  // Always starts a FRESH attempt (backend creates a new attempt every time);
+  // unfinished attempts are never resumed.
+  async function handleStartTest() {
     // If accessStatus specifically marks user as blocked:
     if (accessStatus && accessStatus.allowed === false) {
       if (accessStatus.reason === 'ALREADY_COMPLETED') {
@@ -141,22 +134,35 @@ export default function AssessmentLandingScreen() {
       return;
     }
 
+    // Access status could not be verified (API failed): do not start blindly
+    if (!accessStatus) {
+      Alert.alert('Assessment Error', 'Could not verify your assessment access. Please refresh and try again.');
+      loadData();
+      return;
+    }
+
     try {
       setStarting(true);
       const defaultAssessment = publishedAssessments[0] || {};
       const assessmentId =
         defaultAssessment.id ||
         defaultAssessment._id ||
-        defaultAssessment.assessmentId ||
-        '1';
+        defaultAssessment.assessmentId;
+      if (!assessmentId) {
+        Alert.alert('Assessment Error', 'No assessment is available right now. Please try again later.');
+        return;
+      }
 
       const res = await startAssessmentAttempt(assessmentId);
       const attemptId =
         res?.attemptId ||
         res?.id ||
         res?.data?.attemptId ||
-        res?.data?.id ||
-        `att_${Date.now()}`;
+        res?.data?.id;
+      if (!attemptId) {
+        Alert.alert('Assessment Error', 'Could not start the assessment. Please try again.');
+        return;
+      }
 
       router.push({
         pathname: '/(drawer)/assessment-attempt',
@@ -200,14 +206,14 @@ export default function AssessmentLandingScreen() {
       setShowRetakeModal(true);
     } else {
       Alert.alert(
-        'Start a New Assessment Attempt?',
+        'Start a Fresh Assessment Attempt?',
         'Starting a new attempt will begin a fresh assessment session. Your past reports will remain preserved in your history.',
         [
           { text: 'Cancel', style: 'cancel' },
           {
             text: 'Yes, Start Fresh Test',
             style: 'default',
-            onPress: () => handleStartTest(true),
+            onPress: () => handleStartTest(),
           },
         ]
       );
@@ -217,12 +223,12 @@ export default function AssessmentLandingScreen() {
   // Determine current access and completion state matching user portal
   const isAllowed = accessStatus
     ? accessStatus.allowed === true
-    : !latestCompletedAttempt || !!activeAttempt;
+    : !latestCompletedAttempt;
 
   const isAlreadyCompleted = accessStatus
     ? accessStatus.allowed === false &&
       (accessStatus.reason === 'ALREADY_COMPLETED' || !!accessStatus.completedAttemptId)
-    : Boolean(latestCompletedAttempt) && !activeAttempt;
+    : Boolean(latestCompletedAttempt);
 
   const isNoActivePlan = accessStatus
     ? accessStatus.allowed === false && accessStatus.reason === 'NO_ACTIVE_PLAN'
@@ -233,7 +239,7 @@ export default function AssessmentLandingScreen() {
     latestCompletedAttempt?.id ||
     latestCompletedAttempt?.attemptId ||
     latestCompletedAttempt?._id ||
-    'latest';
+    null;
 
   const formattedCompletedDate =
     accessStatus?.completedAt || latestCompletedAttempt?.completedAt
@@ -380,64 +386,6 @@ export default function AssessmentLandingScreen() {
                   Checking assessment access...
                 </Text>
               </View>
-            ) : activeAttempt ? (
-              /* STATE 1A: In-Progress Attempt Found */
-              <View>
-                <View
-                  style={{
-                    alignSelf: 'flex-start',
-                    backgroundColor: 'rgba(251,191,36,0.25)',
-                    paddingHorizontal: 9,
-                    paddingVertical: 3,
-                    borderRadius: 12,
-                  }}
-                >
-                  <Text style={{ color: '#fef08a', fontSize: 11, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>
-                    In-Progress Test Found
-                  </Text>
-                </View>
-                <Text style={{ color: '#ffffff', fontSize: 17, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800', marginTop: 6 }}>
-                  Continue Your Assessment
-                </Text>
-                <Text style={{ color: '#ffe4e6', fontSize: 12, marginTop: 2 }}>
-                  Your answers are saved. Pick up right where you left off.
-                </Text>
-
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => handleStartTest(false)}
-                  disabled={starting}
-                  style={{
-                    backgroundColor: '#ffffff',
-                    borderRadius: 14,
-                    paddingVertical: 12,
-                    alignItems: 'center',
-                    marginTop: 12,
-                    shadowColor: '#000',
-                    shadowOffset: { width: 0, height: 2 },
-                    shadowOpacity: 0.1,
-                    shadowRadius: 4,
-                  }}
-                >
-                  {starting ? (
-                    <ActivityIndicator color="#9a2119" size="small" />
-                  ) : (
-                    <Text style={{ color: '#1e293b', fontSize: 14, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>
-                      ▶ Resume Assessment
-                    </Text>
-                  )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  activeOpacity={0.7}
-                  onPress={handleRetakeConfirm}
-                  style={{ alignItems: 'center', marginTop: 10 }}
-                >
-                  <Text style={{ color: '#ffe4e6', fontSize: 11, textDecorationLine: 'underline' }}>
-                    Or start a fresh attempt
-                  </Text>
-                </TouchableOpacity>
-              </View>
             ) : isAlreadyCompleted ? (
               /* STATE 2: Test Completed (Locked for Retake under 1-Plan = 1-Attempt Rule) */
               <View>
@@ -472,7 +420,9 @@ export default function AssessmentLandingScreen() {
                 <View style={{ marginTop: 12, gap: 8 }}>
                   <TouchableOpacity
                     activeOpacity={0.85}
+                    disabled={!completedAttemptId}
                     onPress={() => {
+                      if (!completedAttemptId) return;
                       router.push({
                         pathname: '/(drawer)/assessment-report',
                         params: { attemptId: String(completedAttemptId) },
@@ -483,6 +433,7 @@ export default function AssessmentLandingScreen() {
                       borderRadius: 14,
                       paddingVertical: 12,
                       alignItems: 'center',
+                      opacity: completedAttemptId ? 1 : 0.6,
                     }}
                   >
                     <Text style={{ color: '#064e3b', fontSize: 13, fontFamily: 'Poppins_900Black', fontWeight: '900' }}>
@@ -507,7 +458,7 @@ export default function AssessmentLandingScreen() {
                   >
                     <Ionicons name="lock-closed" size={13} color="#fde047" />
                     <Text style={{ color: '#fde047', fontSize: 12, fontFamily: 'Poppins_700Bold', fontWeight: '700' }}>
-                      Retake Test 
+                      Retake Test (Subscribe Plan)
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -607,7 +558,7 @@ export default function AssessmentLandingScreen() {
 
                 <TouchableOpacity
                   activeOpacity={0.85}
-                  onPress={() => handleStartTest(false)}
+                  onPress={() => handleStartTest()}
                   disabled={starting}
                   style={{
                     backgroundColor: '#facc15',
@@ -872,7 +823,7 @@ export default function AssessmentLandingScreen() {
                     fontFamily: 'Poppins_800ExtraBold', fontWeight: '800',
                   }}
                 >
-                  {isAllowed ? '+ New Test' : 'Retake Test'}
+                  {isAllowed ? 'Start New Attempt' : 'Retake Test (Plan Required)'}
                 </Text>
               </TouchableOpacity>
             )}
@@ -913,16 +864,7 @@ export default function AssessmentLandingScreen() {
 
               <TouchableOpacity
                 activeOpacity={0.85}
-                onPress={() => {
-                  if (isNoActivePlan) {
-                    router.push({
-                      pathname: '/(drawer)/subscription',
-                      params: { returnTo: '/(drawer)/(tabs)/assessment' },
-                    });
-                  } else {
-                    handleStartTest(false);
-                  }
-                }}
+                onPress={() => handleStartTest()}
                 style={{
                   backgroundColor: '#9a2119',
                   borderRadius: 12,
@@ -991,40 +933,48 @@ export default function AssessmentLandingScreen() {
                       </View>
                     </View>
 
-                    <TouchableOpacity
-                      activeOpacity={0.85}
-                      onPress={() => {
-                        if (isDone) {
+                    {isDone ? (
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        onPress={() => {
                           router.push({
                             pathname: '/(drawer)/assessment-report',
                             params: { attemptId: String(attemptId) },
                           });
-                        } else {
-                          router.push({
-                            pathname: '/(drawer)/assessment-attempt',
-                            params: { attemptId: String(attemptId) },
-                          });
-                        }
-                      }}
-                      style={{
-                        backgroundColor: isDone ? '#9a2119' : 'transparent',
-                        borderWidth: isDone ? 0 : 1,
-                        borderColor: '#f59e0b',
-                        borderRadius: 10,
-                        paddingVertical: 7,
-                        paddingHorizontal: 12,
-                      }}
-                    >
-                      <Text
+                        }}
                         style={{
-                          color: isDone ? '#ffffff' : '#f59e0b',
-                          fontSize: 12,
-                          fontFamily: 'Poppins_800ExtraBold', fontWeight: '800',
+                          backgroundColor: '#9a2119',
+                          borderRadius: 10,
+                          paddingVertical: 7,
+                          paddingHorizontal: 12,
                         }}
                       >
-                        {isDone ? 'View Report' : 'Resume'}
-                      </Text>
-                    </TouchableOpacity>
+                        <Text
+                          style={{
+                            color: '#ffffff',
+                            fontSize: 12,
+                            fontFamily: 'Poppins_800ExtraBold', fontWeight: '800',
+                          }}
+                        >
+                          View Report
+                        </Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View
+                        style={{
+                          backgroundColor: darkMode ? '#1c1c20' : '#f1f5f9',
+                          borderWidth: 1,
+                          borderColor,
+                          borderRadius: 6,
+                          paddingVertical: 3,
+                          paddingHorizontal: 8,
+                        }}
+                      >
+                        <Text style={{ color: subtextColor, fontSize: 11, fontFamily: 'Poppins_600SemiBold', fontWeight: '600' }}>
+                          Abandoned
+                        </Text>
+                      </View>
+                    )}
                   </View>
                 );
               })}
@@ -1159,7 +1109,7 @@ export default function AssessmentLandingScreen() {
             }}
           >
             <Text style={{ color: textColor, fontSize: 17, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>
-              Start a New Assessment Attempt?
+              Start a Fresh Assessment Attempt?
             </Text>
             <Text style={{ color: subtextColor, fontSize: 13, lineHeight: 18, marginTop: 8 }}>
               Starting a new attempt will begin a fresh assessment session. Your past reports will remain preserved in your history.
@@ -1175,7 +1125,7 @@ export default function AssessmentLandingScreen() {
               <TouchableOpacity
                 onPress={() => {
                   setShowRetakeModal(false);
-                  handleStartTest(true);
+                  handleStartTest();
                 }}
                 style={{
                   backgroundColor: '#9a2119',

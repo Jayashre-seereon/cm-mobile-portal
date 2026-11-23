@@ -58,8 +58,8 @@ export default function SettingsScreen() {
                 if (!value) {
                     return 'New password is required.';
                 }
-                if (value.length < 6) {
-                    return 'New password must be at least 6 characters.';
+                if (!(value.length >= 8 && value.length <= 128 && /[A-Za-z]/.test(value) && /[0-9]/.test(value))) {
+                    return 'Password must be at least 8 characters and include a letter and a number.';
                 }
                 return '';
             case 'confirmPassword':

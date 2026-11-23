@@ -1,11 +1,14 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
+import { Ionicons } from '@expo/vector-icons';
 import { Alert, ActivityIndicator, Text, View } from 'react-native';
 import { useAppState } from '../../src/app-state';
-import { getQuizById, getQuizzes, submitQuiz } from '../../src/api/quizApi';
+import { getQuizAttemptResult, getQuizById, getQuizzes, submitQuiz } from '../../src/api/quizApi';
 import { palette } from '../../src/careermap-data';
 import { AnimatedPressable, Screen, SectionHeader } from '../../src/careermap-ui';
 import { useSearchDeepLink } from '../../src/utils/searchNavigation';
+import { sortQuizzes } from '../../src/utils/quizOrder';
+import { openSubscriptionPrompt } from '../../src/subscription-flow';
 
 function formatQuizCount(value) {
   return `${value} question${value === 1 ? '' : 's'}`;
@@ -51,7 +54,8 @@ export default function QuizScreen() {
         const items = await getQuizzes();
 
         if (isMounted) {
-          setQuizzes(items);
+          // Same default order as the user portal (and the preview loader).
+          setQuizzes(sortQuizzes(Array.isArray(items) ? items : []));
         }
       } catch (_error) {
         if (isMounted) {
@@ -178,8 +182,9 @@ export default function QuizScreen() {
 
     const payload = {
       quizId: selectedQuiz.id,
+      // Same shape as the user portal: numeric question id, option id as sent by the API mapper (string).
       answers: selectedQuiz.questions.map((question, index) => ({
-        questionId: question.id,
+        questionId: Number(question.id) || question.id,
         selectedOption: answers[index],
       })),
     };
@@ -191,10 +196,18 @@ export default function QuizScreen() {
 
     try {
       setIsSubmitting(true);
-      const result = await submitQuiz(payload);
-      setQuizResult(result);
-    } catch (_error) {
-      Alert.alert('Submission failed', 'We could not submit the quiz right now.');
+      const response = await submitQuiz(payload);
+      if (!response) {
+        throw new Error('Could not record your quiz result. Please try again.');
+      }
+      // The score is shown only when the server confirms Quiz access (resultAvailable).
+      // No score is ever calculated on the device.
+      const resultResponse = response.resultAvailable || !response.attemptId
+        ? response
+        : await getQuizAttemptResult(response.attemptId);
+      setQuizResult(resultResponse || response);
+    } catch (error) {
+      Alert.alert('Submission failed', error?.response?.data?.message || error?.message || 'Could not submit the quiz. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -204,6 +217,38 @@ export default function QuizScreen() {
   const selectedAnswer = selectedQuestion ? answers[currentQuestion] : null;
   const totalQuestions = selectedQuiz?.questions?.length || 0;
   const progressValue = totalQuestions > 0 ? Math.round(((currentQuestion + 1) / totalQuestions) * 100) : 0;
+
+  if (quizResult && selectedQuiz && quizResult.resultAvailable !== true) {
+    return (
+      <Screen animationKey={`quiz-result-locked-${selectedQuiz.id}`}>
+        <View className="px-1 pb-8 pt-3">
+          <View className="mb-6">
+            <Text className="text-[12px] font-bold uppercase tracking-[1px] text-brand">Quiz Result</Text>
+            <Text className={`mt-1 text-[22px] font-extrabold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{selectedQuiz.title}</Text>
+          </View>
+
+          <View className={`items-center gap-3 rounded-[26px] border p-[22px] ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`}>
+            <View className="h-16 w-16 items-center justify-center rounded-full bg-[#fdf0ef]">
+              <Ionicons name="lock-closed" size={26} color={palette.primary} />
+            </View>
+            <Text className={`text-center text-[20px] font-extrabold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>Quiz completed</Text>
+            <Text className={`text-center text-[14px] leading-6 ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>
+              Unlock the Quiz module with a plan to view your result.
+            </Text>
+            <AnimatedPressable
+              className="mt-1 rounded-[16px] bg-brand px-5 py-3.5"
+              onPress={() => openSubscriptionPrompt({ pathname: '/(drawer)/quiz' })}
+            >
+              <Text className="text-[14px] font-extrabold text-white">Unlock Quiz</Text>
+            </AnimatedPressable>
+            <AnimatedPressable className="px-4 py-2" onPress={resetQuizFlow}>
+              <Text className="text-[14px] font-bold text-brand">Back to quizzes</Text>
+            </AnimatedPressable>
+          </View>
+        </View>
+      </Screen>
+    );
+  }
 
   if (quizResult && selectedQuiz) {
     return (
@@ -455,6 +500,10 @@ export default function QuizScreen() {
                   </View>
 
                   <View className="items-end gap-2">
+                    {/* Every quiz can be opened and taken (the portal also marks them all free), so each one shows the green open lock. */}
+                    <View className="h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: '#f0fdf4' }}>
+                      <Ionicons name="lock-open-outline" size={16} color="#16a34a" />
+                    </View>
                     <View
                       className="rounded-[15px] px-3 py-2"
                       style={{

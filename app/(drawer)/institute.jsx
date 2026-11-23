@@ -4,10 +4,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useAppState } from '../../src/app-state';
 import { palette } from '../../src/careermap-data';
-import { getCategories, getInstituteById, getInstitutes } from '../../src/api/instituteApi';
+import { getCategories, getInstituteById, getInstituteFilters, getInstitutes } from '../../src/api/instituteApi';
 import { checkModuleAccess, getModules } from '../../src/api/moduleAccessApi';
 import { AnimatedPressable, Screen, SectionHeader, UnlockBottomSheet } from '../../src/careermap-ui';
 import { useSearchDeepLink } from '../../src/utils/searchNavigation';
+import { buildFreeKeys, isPreviewFree, loadPreviewFreeKeys, PREVIEW_MODULES } from '../../src/utils/previewAccess';
 
 const getInstituteInitials = (name) => {
     const source = String(name || 'Institute').trim();
@@ -101,6 +102,8 @@ export default function InstituteScreen() {
     const [isLoading, setIsLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
     const [hasFullAccess, setHasFullAccess] = useState(false);
+    const [accessMode, setAccessMode] = useState('preview');
+    const [directoryFreeKeys, setDirectoryFreeKeys] = useState(null);
     const [moduleAccessResolved, setModuleAccessResolved] = useState(false);
     const [showUnlockSheet, setShowUnlockSheet] = useState(false);
     const [page, setPage] = useState(1);
@@ -204,18 +207,23 @@ const [categorySearchQuery, setCategorySearchQuery] = useState('');
                 if (!Number.isFinite(moduleId)) {
                     if (isMounted) {
                         setHasFullAccess(true);
+                        setAccessMode('full');
                         setModuleAccessResolved(true);
                     }
                     return;
                 }
                 const response = await checkModuleAccess(moduleId);
                 if (!isMounted) return;
-                setHasFullAccess(String(response?.mode || '').toLowerCase() === 'full');
+                const mode = String(response?.mode || '').toLowerCase();
+                const isFull = mode === 'full' || mode === 'unlocked';
+                setHasFullAccess(isFull);
+                setAccessMode(isFull ? 'full' : mode === 'locked' ? 'locked' : 'preview');
                 setModuleAccessResolved(true);
             }
             catch {
                 if (isMounted) {
                     setHasFullAccess(true);
+                    setAccessMode('full');
                     setModuleAccessResolved(true);
                 }
             }
@@ -225,20 +233,74 @@ const [categorySearchQuery, setCategorySearchQuery] = useState('');
             isMounted = false;
         };
     }, [resolvedModuleId]);
+    // In preview the free institutes are the first ones of the FULL directory (page 1, no
+    // filters) - never the first ones of the filtered view - so filtering or pinning a
+    // search hit can't unlock an institute.
+    useEffect(() => {
+        if (accessMode !== 'preview') return undefined;
+        let active = true;
+        loadPreviewFreeKeys(PREVIEW_MODULES.institutes)
+            .then((keys) => {
+                if (active) setDirectoryFreeKeys(keys);
+            })
+            .catch(() => {});
+        return () => {
+            active = false;
+        };
+    }, [accessMode]);
+    const isDefaultDirectoryView = page === 1 && typeFilter === 'All' && countryFilter === 'All' && stateFilter === 'All' && categoryFilter === 'All';
+    // Until the directory's first page is known, the unfiltered first page is a safe stand-in.
+    const previewFreeKeys = useMemo(
+        () => directoryFreeKeys || (isDefaultDirectoryView ? buildFreeKeys(institutes) : null),
+        [directoryFreeKeys, isDefaultDirectoryView, institutes]
+    );
+    // Filter options that narrow each other (same as the user portal): every list only offers
+    // values that still have institutes for the OTHER selected filters, in any order.
+    const [facets, setFacets] = useState(null);
+    useEffect(() => {
+        let active = true;
+        getInstituteFilters({ category: categoryFilter, country: countryFilter, state: stateFilter, type: typeFilter })
+            .then((result) => { if (active) setFacets(result); })
+            .catch(() => { if (active) setFacets(null); });
+        return () => { active = false; };
+    }, [categoryFilter, countryFilter, stateFilter, typeFilter]);
     const countryOptions = useMemo(() => {
-        return ['All', 'India', 'Other'];
-    }, []);
+        if (!facets) return ['All', 'India', 'Other'];
+        const names = facets.countries.map((entry) => normalizeFilterValue(entry.country));
+        const options = ['All'];
+        if (names.includes('india') || countryFilter === 'India') options.push('India');
+        if (names.some((name) => name !== 'india') || countryFilter === 'Other') options.push('Other');
+        return options;
+    }, [facets, countryFilter]);
     const typeOptions = useMemo(
-        // Keep the common ownership types available even when the current API
-        // response is already filtered to one type (for example, Pvt only).
-        () => ['All', ...Array.from(new Map(
-            ['Govt', 'Pvt', ...institutes.map((item) => item.type).filter(Boolean)]
-                .map((value) => [normalizeFilterValue(value), value])
-        ).values())],
-        [institutes]
+        () => {
+            const all = Array.from(new Map(
+                ['Govt', 'Pvt', ...institutes.map((item) => item.type).filter(Boolean)]
+                    .map((value) => [normalizeFilterValue(value), value])
+            ).values());
+            if (!facets) {
+                // Keep the common ownership types available even when the current API
+                // response is already filtered to one type (for example, Pvt only).
+                return ['All', ...all];
+            }
+            const available = new Set(facets.types.map((entry) => normalizeFilterValue(entry.type)));
+            const keep = all.filter((value) =>
+                available.has(normalizeFilterValue(value))
+                || available.has(normalizeFilterValue(getInstituteTypeLabel(value)))
+                || normalizeFilterValue(value) === normalizeFilterValue(typeFilter));
+            return ['All', ...keep];
+        },
+        [institutes, facets, typeFilter]
     );
     const stateOptions = useMemo(() => {
         const selectedCountry = normalizeFilterValue(countryFilter);
+        if (facets && selectedCountry !== 'all') {
+            const available = new Set(facets.states.map((entry) => normalizeFilterValue(entry.state)));
+            const list = selectedCountry === 'india'
+                ? INDIA_STATES.filter((name) => available.has(normalizeFilterValue(name)) || normalizeFilterValue(name) === normalizeFilterValue(stateFilter))
+                : facets.states.map((entry) => entry.state);
+            return ['All', ...list];
+        }
         const source = selectedCountry === 'india'
             ? INDIA_STATES
             : Array.from(new Set(institutes
@@ -249,11 +311,16 @@ const [categorySearchQuery, setCategorySearchQuery] = useState('');
                 .filter(Boolean)));
 
         return ['All', ...source];
-    }, [countryFilter, institutes]);
-    const categoryOptions = useMemo(() => categories.map((item) => ({
-        value: String(item?.title || item?.name || item?.id || ''),
-        label: String(item?.title || item?.name || item?.id || ''),
-    })).filter((item) => item.value), [categories]);
+    }, [countryFilter, institutes, facets, stateFilter]);
+    const categoryOptions = useMemo(() => {
+        const all = categories.map((item) => ({
+            value: String(item?.title || item?.name || item?.id || ''),
+            label: String(item?.title || item?.name || item?.id || ''),
+        })).filter((item) => item.value);
+        if (!facets) return all;
+        const available = new Set(facets.categories.map((entry) => normalizeFilterValue(entry.title)));
+        return all.filter((item) => available.has(normalizeFilterValue(item.value)) || normalizeFilterValue(item.value) === normalizeFilterValue(categoryFilter));
+    }, [categories, facets, categoryFilter]);
 
 function getOptionValue(option) {
     return String(option?.value ?? option?.id ?? option?.label ?? option ?? '');
@@ -330,8 +397,8 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
         return source;
     }, [categoryFilter, institutes, countryFilter, stateFilter, typeFilter]);
 
-    // Global search / Career Bee: show the picked institute first. Its lock still follows its
-    // position in the normal list (or stays locked if it is not on this page).
+    // Global search / Career Bee: show the picked institute first. Its lock still follows the
+    // full directory's free items, so pinning it to the top never unlocks it.
     const searchFocusActive = useSearchDeepLink(params.searchKey, !isLoading && moduleAccessResolved, () => {
         const instituteId = typeof params.instituteId === 'string'
             ? params.instituteId
@@ -597,8 +664,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                 ) : null}
 
              {displayedInstitutes.map((item) => {
-    const index = filtered.findIndex((entry) => String(entry.id) === String(item.id));
-    const cardUnlocked = hasFullAccess || (index !== -1 && index < 4);
+    const cardUnlocked = hasFullAccess || (accessMode === 'preview' && isPreviewFree(previewFreeKeys, item));
     const ownershipLabel = getInstituteOwnershipLabel(item.type);
     const isGovernment = ownershipLabel === 'Government';
     return (

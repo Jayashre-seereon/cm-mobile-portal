@@ -13,6 +13,7 @@ import { palette } from '../../src/careermap-data';
 import { AnimatedPressable, Screen, SectionHeader, UnlockBottomSheet } from '../../src/careermap-ui';
 import { openSubscriptionPrompt } from '../../src/subscription-flow';
 import { useSearchDeepLink } from '../../src/utils/searchNavigation';
+import { buildFreeKeys, isPreviewFree } from '../../src/utils/previewAccess';
 
 const INITIAL_CONSULT_FORM = {
     fullName: '',
@@ -249,7 +250,10 @@ export default function AbroadScreen() {
     const params = useLocalSearchParams();
     const { width } = useWindowDimensions();
     const { isUnlocked, preferences } = useAppState();
-    const unlocked = isUnlocked('abroad-consultancy');
+    // Same as the user portal: the module is "unlocked" with an active plan OR when the server
+    // confirms full access (moduleStatus, set below). Only then are the lock badges hidden and
+    // consultations allowed; in preview even a free destination still needs a plan to consult.
+    const hasPlanAccess = isUnlocked('abroad-consultancy');
     const autoSubmitHandledRef = useRef('');
     const [countries, setCountries] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
@@ -272,6 +276,12 @@ export default function AbroadScreen() {
     const [moduleStatus, setModuleStatus] = useState('locked');
     const [moduleAccessResolved, setModuleAccessResolved] = useState(false);
     const selectedCountry = selected !== null ? countries[selected] : null;
+    // In preview the free destinations are the first 4 of the FULL list (highest id first);
+    // full access opens everything, a locked module opens nothing.
+    const previewFreeKeys = useMemo(() => buildFreeKeys(countries), [countries]);
+    const unlocked = hasPlanAccess || moduleStatus === 'full' || moduleStatus === 'unlocked';
+    const isCountryOpen = (country) => moduleStatus === 'full' || moduleStatus === 'unlocked'
+        || (moduleStatus === 'preview' && isPreviewFree(previewFreeKeys, country));
     const UG_PROGRAMS = [
   'BBA', 'B.Com', 'B.Tech / Engineering', 'Computer Science', 'Artificial Intelligence',
   'Data Science', 'Nursing', 'Psychology', 'Architecture', 'Hospitality Management',
@@ -413,7 +423,8 @@ const PG_PROGRAMS = [
                 const items = await getStudyAbroadCountries();
 
                 if (isMounted) {
-                    setCountries(items);
+                    // Highest id first (the free destinations are worked out in the same order).
+                    setCountries(Array.isArray(items) ? [...items].sort((a, b) => b.id - a.id) : []);
                 }
             }
             catch (_error) {
@@ -474,10 +485,30 @@ const PG_PROGRAMS = [
             isMounted = false;
         };
     }, []);
+    // Return from the subscription flow (params.selected = list index): open that destination only
+    // once the list and access are known, with the same lock rule as tapping its card.
+    const selectedParamHandledRef = useRef(null);
     useEffect(() => {
-        if (typeof params.selected === 'string') {
-            setSelected(Number(params.selected));
+        if (typeof params.selected !== 'string' || isLoading || !moduleAccessResolved) {
+            return;
         }
+        if (selectedParamHandledRef.current === params.selected) {
+            return;
+        }
+        selectedParamHandledRef.current = params.selected;
+        const index = Number(params.selected);
+        const country = Number.isInteger(index) ? countries[index] : undefined;
+        if (!country) {
+            return;
+        }
+        if (!isCountryOpen(country)) {
+            setShowUnlockSheet(true);
+            return;
+        }
+        setSelected(index);
+    }, [params.selected, isLoading, moduleAccessResolved, countries, moduleStatus]);
+
+    useEffect(() => {
         setShowForm(params.showForm === 'true');
         if (typeof params.preferredCountry === 'string') {
             setPreferredCountry(params.preferredCountry);
@@ -537,7 +568,7 @@ const PG_PROGRAMS = [
         if (index === -1) {
             return;
         }
-        const detailOpen = moduleStatus === 'full' || (moduleStatus === 'preview' && index < 4);
+        const detailOpen = isCountryOpen(countries[index]);
         if (!detailOpen) {
             setShowUnlockSheet(true);
             return;
@@ -726,8 +757,8 @@ const closeDatePicker = () => setDatePickerField(null);
           <FormField label="Tell us anything else about your study plans..." value={consultationDetails.message} onChangeText={(value) => updateConsultationDetail('message', value)} placeholder="Tell us anything else about your study plans..." darkMode={darkMode} multiline/>
 
           {submitError ? (<Text className="text-[13px] font-semibold text-brand">{submitError}</Text>) : null}
-          <AnimatedPressable className="rounded-[16px] bg-brand py-[14px]" onPress={handleSubmitConsultation} disabled={isSubmitting}>
-            <Text className="text-center text-[14px] font-extrabold text-white">{isSubmitting ? 'Submitting...' : 'Submit Consultation'}</Text>
+          <AnimatedPressable className="rounded-[16px] bg-brand py-[14px]" onPress={unlocked ? handleSubmitConsultation : () => openSubscriptionPrompt(formReturnTarget)} disabled={isSubmitting}>
+            <Text className="text-center text-[14px] font-extrabold text-white">{isSubmitting ? 'Submitting...' : unlocked ? 'Submit Consultation' : 'Subscribe to Submit'}</Text>
           </AnimatedPressable>
         </View>
       </Screen>
@@ -768,13 +799,22 @@ const closeDatePicker = () => setDatePickerField(null);
           
 
             <AnimatedPressable className="rounded-[16px] bg-brand py-[14px] mt-3" onPress={() => {
+                    // Same as the user portal: consulting needs an unlocked module, even for a free preview destination.
+                    if (!unlocked) {
+                        setShowUnlockSheet(true);
+                        return;
+                    }
                     setPreferredCountry(country.countryName);
                     setShowForm(true);
                 }}>
-              <Text className="text-center text-[14px]  font-extrabold text-white">Consult Now</Text>
+              <Text className="text-center text-[14px]  font-extrabold text-white">{unlocked ? 'Get Free Consultation' : 'Unlock Consultation'}</Text>
             </AnimatedPressable>
           </>
         </View>
+        {showUnlockSheet ? (<UnlockBottomSheet title="Unlock Study Abroad" subtitle="Subscribe to more country details, scholarships, visa guidance, and counselling access." onClose={() => setShowUnlockSheet(false)} onPress={() => {
+                    setShowUnlockSheet(false);
+                    openSubscriptionPrompt(formReturnTarget);
+                }}/>) : null}
       </Screen>);
     }
     return (<Screen animationKey={animationKey}>
@@ -823,7 +863,7 @@ const closeDatePicker = () => setDatePickerField(null);
       {!isLoading && loadError ? (<Text className="text-[13px] text-brand">{loadError}</Text>) : null}
       <View className="gap-3">
         {countries.map((country, index) => {
-            const detailOpen = moduleStatus === 'full' || (moduleStatus === 'preview' && index < 4);
+            const detailOpen = isCountryOpen(country);
             const cardPadding = width < 420 ? 'p-[16px]' : 'p-[18px]';
             return (<Pressable key={country.id} className={`relative gap-1.5 rounded-[22px] border ${cardPadding} ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`} 
              onPress={() => {
@@ -833,11 +873,12 @@ const closeDatePicker = () => setDatePickerField(null);
   }
   setSelected(index);
 }}>
-            <View className={`absolute right-4 top-4 h-6 w-6 items-center justify-center rounded-full ${detailOpen ? 'bg-[#e4f7ed]' : 'bg-[#fdecea]'}`}>
+            {/* Green open lock = open (free / full access), red lock = locked. Always shown, also when the module is free. */}
+            <View className="absolute right-3 top-3 h-8 w-8 items-center justify-center rounded-full" style={{ backgroundColor: detailOpen ? '#f0fdf4' : '#fef2f2' }}>
                 <Ionicons
-                    name={detailOpen ? 'lock-open' : 'lock-closed'}
-                    size={13}
-                    color={detailOpen ? '#2f9367' : '#e53935'}
+                    name={detailOpen ? 'lock-open-outline' : 'lock-closed-outline'}
+                    size={16}
+                    color={detailOpen ? '#16a34a' : '#ef4444'}
                 />
             </View>
             {width < 520 ? (<View className="gap-3 pt-1">
@@ -853,7 +894,7 @@ const closeDatePicker = () => setDatePickerField(null);
                 <View className="h-11 w-11 items-center justify-center rounded-[14px]" style={{ backgroundColor: `${palette.primary}10` }}>
                   <Text className="text-[11px] font-black text-brand">{country.countryName.slice(0, 3).toUpperCase()}</Text>
                 </View>
-                <View className="min-w-0 flex-1 gap-1 pr-2">
+                <View className="min-w-0 flex-1 gap-1 pr-10">
                   <Text numberOfLines={2} className={`text-[16px] font-extrabold leading-5 ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{country.title}</Text>
                     </View>
                 <View className="items-end gap-2" />

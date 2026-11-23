@@ -7,7 +7,17 @@ import { useAppState } from './app-state';
 import { moduleCards, palette } from './careermap-data';
 import { UnlockBottomSheet } from './careermap-ui';
 import { openSubscriptionPrompt } from './subscription-flow';
-import { openTarget, resolveSearchTarget } from './utils/searchNavigation';
+import { getPreviewAccessKind, loadPreviewFreeKeys, resolvePreviewAccess } from './utils/previewAccess';
+import {
+    ALWAYS_FREE_PREVIEW_MODULES,
+    ROUTES,
+    ROUTE_PREVIEW_MODULE,
+    isDirectSearchResult,
+    loadDashboardModulesByRoute,
+    normalizeAccessStatus,
+    openTarget,
+    resolveSearchTarget,
+} from './utils/searchNavigation';
 
 // Same groups, labels and badges as the web portal's GlobalSearchBar.
 const CATEGORY_TABS = [
@@ -39,6 +49,23 @@ const RESULT_GROUPS = [
 ];
 
 const EMPTY_DATA = { total: 0, results: [], grouped: {} };
+
+// Module access badges, mirroring the module cards and lists (portal: GlobalSearchBar).
+const LOCKED_BADGE = { label: 'Locked', locked: true, icon: 'lock-closed', color: '#e53935' };
+const PREVIEW_BADGE = { label: 'Preview', locked: false, icon: 'time-outline', color: palette.orange };
+const FREE_BADGE = { label: 'Unlocked', locked: false, icon: 'lock-open', color: palette.green };
+// Shown while a preview module's free items are still loading, instead of nothing
+// (which would look like "unlocked").
+const CHECKING_BADGE = { label: 'Checking', locked: false, checking: true, color: '#8a8a8a' };
+
+// Lists small enough to load as soon as search opens (not the large exam list).
+const WARM_PREVIEW_ROUTES = [ROUTES.institute, ROUTES.abroad, ROUTES.newsletter, ROUTES.mentor, ROUTES.learn];
+
+// In-app route a result opens, or null for external links.
+function getResultPath(item) {
+    const target = resolveSearchTarget(item);
+    return target?.url ? null : target?.pathname || null;
+}
 
 function normalizeSearchText(value = '') {
     return String(value)
@@ -127,6 +154,98 @@ export function GlobalSearch({ visible, onClose }) {
     const [data, setData] = useState(EMPTY_DATA);
     const [openingKey, setOpeningKey] = useState('');
     const [lockedInfo, setLockedInfo] = useState(null);
+    // Dashboard modules (Unlocked / Preview / Locked) keyed by route.
+    const [moduleByRoute, setModuleByRoute] = useState(() => new Map());
+    // Free items of each preview "list" module, keyed by module key. `false` = failed load.
+    const [freeKeysByModule, setFreeKeysByModule] = useState({});
+
+    // Load the modules' access status each time search opens.
+    useEffect(() => {
+        if (!visible) {
+            return undefined;
+        }
+        let active = true;
+        loadDashboardModulesByRoute()
+            .then((map) => {
+                if (active) setModuleByRoute(map);
+            })
+            .catch((err) => {
+                console.log('Search: could not load module access', err?.message || err);
+            });
+        return () => {
+            active = false;
+        };
+    }, [visible]);
+
+    // Load one module's free items (loadPreviewFreeKeys caches them for a few minutes).
+    const fetchFreeKeys = (moduleKey, isActive) => {
+        loadPreviewFreeKeys(moduleKey)
+            .then((keys) => {
+                if (isActive()) setFreeKeysByModule((prev) => (prev[moduleKey] === keys ? prev : { ...prev, [moduleKey]: keys }));
+            })
+            .catch((err) => {
+                console.log('Search: could not load free preview items', err?.message || err);
+                if (isActive()) setFreeKeysByModule((prev) => (prev[moduleKey] === false ? prev : { ...prev, [moduleKey]: false }));
+            });
+    };
+
+    const previewListModuleFor = (path) => {
+        const moduleKey = path ? ROUTE_PREVIEW_MODULE[path] : null;
+        if (!moduleKey || ALWAYS_FREE_PREVIEW_MODULES.has(moduleKey)) return null;
+        if (normalizeAccessStatus(moduleByRoute.get(path)?.accessStatus) !== 'preview') return null;
+        return getPreviewAccessKind(moduleKey) === 'list' ? moduleKey : null;
+    };
+
+    // Results from a preview module: make sure that module's free items are known.
+    useEffect(() => {
+        const keys = new Set();
+        data.results.forEach((item) => {
+            if (!isDirectSearchResult(item)) return;
+            const moduleKey = previewListModuleFor(getResultPath(item));
+            if (moduleKey) keys.add(moduleKey);
+        });
+        let active = true;
+        keys.forEach((moduleKey) => fetchFreeKeys(moduleKey, () => active));
+        return () => {
+            active = false;
+        };
+    }, [data.results, moduleByRoute]);
+
+    // When search opens, warm up the small lists so results show Unlocked / Locked straight away.
+    useEffect(() => {
+        if (!visible) return undefined;
+        let active = true;
+        WARM_PREVIEW_ROUTES.forEach((route) => {
+            const moduleKey = previewListModuleFor(route);
+            if (moduleKey) fetchFreeKeys(moduleKey, () => active);
+        });
+        return () => {
+            active = false;
+        };
+    }, [visible, moduleByRoute]);
+
+    // Badge shown on a result: same as the module's card / list.
+    const getAccessBadge = (item) => {
+        const path = getResultPath(item);
+        // The assessment screen is always enterable (past reports); it handles its own lock.
+        if (!path || path === ROUTES.assessment) return null;
+        const status = normalizeAccessStatus(moduleByRoute.get(path)?.accessStatus);
+        if (!status || status === 'unlocked') return null;
+        if (status === 'locked') return LOCKED_BADGE;
+        // Preview module: the module card itself is enterable, like on the dashboard.
+        if (String(item?.type || '').toLowerCase() === 'module') return PREVIEW_BADGE;
+        if (!isDirectSearchResult(item)) return null;
+        const moduleKey = ROUTE_PREVIEW_MODULE[path];
+        if (!moduleKey) return null;
+        // Every quiz is free in preview (the quiz screen hard-codes it), so never lock one here.
+        if (ALWAYS_FREE_PREVIEW_MODULES.has(moduleKey)) return FREE_BADGE;
+        const freeKeys = freeKeysByModule[moduleKey];
+        const access = resolvePreviewAccess(item, moduleKey, { freeKeys: freeKeys || undefined });
+        if (access === 'locked') return LOCKED_BADGE;
+        if (access === 'free') return FREE_BADGE;
+        if (access === 'pending') return freeKeys === false ? null : CHECKING_BADGE;
+        return null; // the module's screen checks with the server when the item is opened
+    };
 
     // Debounced (300 ms) search. Every new keystroke aborts the previous request and
     // a request id guard drops any response that is not the latest one.
@@ -275,7 +394,7 @@ export function GlobalSearch({ visible, onClose }) {
         }
         setOpeningKey(rowKey);
         try {
-            const result = await openTarget(resolveSearchTarget(item), { onLocked: setLockedInfo, fromGlobalSearch: true });
+            const result = await openTarget(resolveSearchTarget(item), { onLocked: setLockedInfo, fromGlobalSearch: true, searchItem: item });
             if (result !== 'locked') {
                 onClose?.();
             }
@@ -297,6 +416,7 @@ export function GlobalSearch({ visible, onClose }) {
     const renderRow = (item, index, sectionKey) => {
         const config = getTypeConfig(item);
         const rowKey = `${sectionKey}-${item?.type}-${item?.id ?? item?.title}-${index}`;
+        const accessBadge = getAccessBadge(item);
         return (<Pressable key={rowKey} accessibilityRole="button" onPress={() => handleSelect(item, rowKey)} className={`flex-row items-center gap-3 rounded-[18px] border p-3 ${dark ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`} style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
         <ResultThumb item={item} color={config.color}/>
         <View className="flex-1 gap-1">
@@ -305,10 +425,14 @@ export function GlobalSearch({ visible, onClose }) {
             <View className="rounded-full px-2 py-[2px]" style={{ backgroundColor: `${config.color}18` }}>
               <Text numberOfLines={1} className="text-[10px] font-bold uppercase" style={{ color: config.color }}>{config.label}</Text>
             </View>
+            {accessBadge ? (<View className="flex-row items-center gap-1 rounded-full px-2 py-[2px]" style={{ backgroundColor: `${accessBadge.color}18` }}>
+                {accessBadge.checking ? <ActivityIndicator size="small" color={accessBadge.color} style={{ width: 10, height: 10, transform: [{ scale: 0.5 }] }}/> : <Ionicons name={accessBadge.icon} size={10} color={accessBadge.color}/>}
+                <Text numberOfLines={1} className="text-[10px] font-bold uppercase" style={{ color: accessBadge.color }}>{accessBadge.label}</Text>
+              </View>) : null}
             {item?.subtitle || item?.description ? (<Text numberOfLines={1} className={`flex-1 text-[12px] ${muted}`}>{item.subtitle || item.description}</Text>) : null}
           </View>
         </View>
-        {openingKey === rowKey ? <ActivityIndicator size="small" color={palette.primary}/> : <Ionicons name="chevron-forward" size={18} color={palette.muted}/>}
+        {openingKey === rowKey ? <ActivityIndicator size="small" color={palette.primary}/> : accessBadge?.locked ? <Ionicons name="lock-closed" size={16} color="#e57373"/> : <Ionicons name="chevron-forward" size={18} color={palette.muted}/>}
       </Pressable>);
     };
 

@@ -10,7 +10,7 @@ import { AnimatedPressable } from '../src/careermap-ui';
 import { AnimatedBackground } from '../src/animated-background';
 import { ZoomInPage } from '../src/page-transition';
 import { useAuthStore } from '../src/store/auth-store';
-import { buildLandingData, buildUsername, formatDateForApi, formatDateForDisplay, formatOtpMobile, getDateError, getEmailError, getPasswordError, isValidDateInput, isValidEmail, isValidPassword, normalizeMobile, splitFullName } from '../src/utils/auth';
+import { PASSWORD_POLICY_MESSAGE, buildLandingData, buildUsername, formatDateForApi, formatDateForDisplay, formatOtpMobile, getDateError, getEmailError, getMobileError, getNewPasswordError, isStrongPassword, isValidDateInput, isValidEmail, isValidMobileNumber, normalizeMobile, splitFullName } from '../src/utils/auth';
 const selectionMeta = [
     { key: 'selectedClass', label: 'Class', icon: 'school-outline', color: palette.blue },
     { key: 'selectedStream', label: 'Stream', icon: 'layers-outline', color: palette.purple },
@@ -103,9 +103,9 @@ export default function ProfileSetupScreen() {
             case 'email':
                 return getEmailError(value);
             case 'mobile':
-                return value && normalizeMobile(value).length !== 10 ? 'Enter a valid 10 digit mobile number.' : '';
+                return getMobileError(value);
             case 'password':
-                return getPasswordError(value);
+                return getNewPasswordError(value);
             case 'dob':
                 return getDateError(value);
             default:
@@ -125,8 +125,8 @@ export default function ProfileSetupScreen() {
     const isValid = form.name &&
         form.username &&
         isValidEmail(form.email) &&
-        normalizeMobile(form.mobile).length === 10 &&
-        isValidPassword(form.password) &&
+        isValidMobileNumber(form.mobile) &&
+        isStrongPassword(form.password) &&
         form.gender &&
         form.dob &&
         isValidDateInput(form.dob);
@@ -151,8 +151,8 @@ export default function ProfileSetupScreen() {
     const handleSubmit = async () => {
         const nextErrors = {
             email: getEmailError(form.email),
-            mobile: form.mobile && normalizeMobile(form.mobile).length !== 10 ? 'Enter a valid 10 digit mobile number.' : '',
-            password: getPasswordError(form.password),
+            mobile: getMobileError(form.mobile),
+            password: getNewPasswordError(form.password),
             dob: getDateError(form.dob),
         };
         setFieldErrors(nextErrors);
@@ -161,8 +161,8 @@ export default function ProfileSetupScreen() {
             setStatus({ type: 'error', message: 'Please verify OTP first.' });
             return;
         }
-        if (normalizeMobile(form.mobile).length !== 10) {
-            setStatus({ type: 'error', message: 'Enter a valid 10 digit mobile number.' });
+        if (!isValidMobileNumber(form.mobile)) {
+            setStatus({ type: 'error', message: 'Enter a valid 10 digit mobile number starting with 6-9.' });
             return;
         }
         if (nextErrors.email) {
@@ -170,7 +170,7 @@ export default function ProfileSetupScreen() {
             return;
         }
         if (nextErrors.password) {
-            setStatus({ type: 'error', message: 'Password must be at least 6 characters.' });
+            setStatus({ type: 'error', message: PASSWORD_POLICY_MESSAGE });
             return;
         }
         if (nextErrors.dob) {

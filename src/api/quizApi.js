@@ -2,23 +2,24 @@ import api from './axios';
 
 function mapQuizOption(option) {
   return {
-    id: option?.id,
+    // Option ids are strings, as on the user portal; the server converts them back to integers.
+    id: String(option?.id ?? ''),
     text: option?.text || '',
   };
 }
 
 function mapQuizQuestion(question) {
   return {
-    id: question?.id,
+    id: String(question?.id ?? ''),
     question: question?.question || '',
-    quizId: question?.quizId,
+    quizId: question?.quizId ?? null,
     options: Array.isArray(question?.options) ? question.options.map(mapQuizOption) : [],
   };
 }
 
 function mapQuizItem(quiz) {
   return {
-    id: quiz?.id,
+    id: String(quiz?.id ?? ''),
     title: quiz?.title || 'Untitled Quiz',
     type: quiz?.type || 'Quiz',
     duration: quiz?.duration ?? 0,
@@ -42,7 +43,15 @@ export async function getQuizById(quizId) {
   return quiz ? mapQuizItem(quiz) : null;
 }
 
+// Returns { attemptId, resultAvailable, ...(total, correct, wrong, score when resultAvailable) }.
+// The server withholds the score unless the user has Quiz access.
 export async function submitQuiz(payload) {
   const response = await api.post('/quiz/submit-quiz', payload);
+  return response?.data?.data || null;
+}
+
+// The server-confirmed result of an attempt ({ resultAvailable: false, message } without Quiz access).
+export async function getQuizAttemptResult(attemptId) {
+  const response = await api.get(`/quiz/attempt/${attemptId}/result`);
   return response?.data?.data || null;
 }

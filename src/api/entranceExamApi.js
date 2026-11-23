@@ -105,8 +105,8 @@ function mapEntranceExam(item, index) {
     topColleges: formatTopColleges(item?.top_institution),
     website: item?.url || '#',
     categoryId: item?.categoryId ?? categoryObj?.id ?? null,
-    secondcategoryId: item?.secondcategoryId ?? null,
-    subcategoryId: item?.subcategoryId ?? null,
+    secondcategoryId: item?.secondcategoryId ?? secondcategoryObj?.id ?? null,
+    subcategoryId: item?.subcategoryId ?? subcategoryObj?.id ?? null,
     categoryObj,
     secondcategoryObj,
     subcategoryObj,
@@ -115,14 +115,31 @@ function mapEntranceExam(item, index) {
       secondcategoryObj?.title || secondcategoryObj?.name || secondcategoryObj?.label || item?.secondcategoryName || '',
     subcategoryName:
       subcategoryObj?.title || subcategoryObj?.name || subcategoryObj?.label || item?.subcategoryName || '',
+    // The lean list (see getEntranceExams) has no `about` / `details`. Such an exam still
+    // needs getEntranceExamById before its detail screen can show the full text.
+    isLean: item?.about === undefined && item?.details === undefined,
   };
 }
 
+// The cards and filters only need a few fields. `lean=true` asks the server to leave out the
+// long description text, which is most of the full list (several MB for 400+ exams, past the
+// 20 s request timeout). An older server ignores the flag and returns everything, which still
+// works - just slower. Order is the server's (API) order, which the preview "first 4 free" uses.
 export async function getEntranceExams() {
-  const response = await api.get('/entranceexam');
+  const response = await api.get('/entranceexam', { params: { lean: true } });
   const items = Array.isArray(response?.data?.data) ? response.data.data : [];
 
   return items.map((item, index) => mapEntranceExam(item, index));
+}
+
+// The full record of one exam (long description), loaded when it is opened.
+export async function getEntranceExamById(id) {
+  const response = await api.get(`/entranceexam/${encodeURIComponent(id)}`);
+  const item = response?.data?.data;
+  if (!item) {
+    throw new Error('Exam details are not available right now.');
+  }
+  return mapEntranceExam(item, 0);
 }
 
 export const getCategories = async () => {

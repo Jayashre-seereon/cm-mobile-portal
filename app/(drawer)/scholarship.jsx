@@ -277,14 +277,15 @@ const filtered = useMemo(() => {
             if (selected === 'pg') {
                 return /\bpg\b|postgraduate|post-graduation|master/.test(eligibility);
             }
-// Type filter
-if (typeFilter !== 'All') {
-    source = source.filter(
-        (item) => String(item.tag) === String(typeFilter)
-    );
-}
             return true;
         });
+    }
+
+    // Type filter (was nested inside the eligibility filter, so it only worked after picking a range)
+    if (typeFilter !== 'All') {
+        source = source.filter(
+            (item) => String(item.tag || '').trim().toLowerCase() === String(typeFilter).trim().toLowerCase()
+        );
     }
 
     // Status filter
@@ -298,14 +299,17 @@ if (typeFilter !== 'All') {
         source.sort((a, b) => a.name.localeCompare(b.name));
     } else if (sortBy === 'Z-A') {
         source.sort((a, b) => b.name.localeCompare(a.name));
-    } else if (activeStatus === 'All') {
-        source.sort((a, b) => (a.status === 'Expired' ? 1 : 0) - (b.status === 'Expired' ? 1 : 0));
+    } else {
+        // Same order as the user portal: in the All view every active opportunity (including
+        // Coming soon) comes before expired ones, then newest first (createdAt, else highest id).
         source.sort((a, b) => {
-            if (a.status !== 'Active' || b.status !== 'Active') return 0;
-            const aCreatedAt = a.createdAt ? new Date(a.createdAt).getTime() : Number.NaN;
-            const bCreatedAt = b.createdAt ? new Date(b.createdAt).getTime() : Number.NaN;
-            if (Number.isNaN(aCreatedAt) || Number.isNaN(bCreatedAt)) return 0;
-            return bCreatedAt - aCreatedAt;
+            if (activeStatus === 'All' && a.status !== b.status) {
+                return a.status === 'Active' ? -1 : 1;
+            }
+            if (a.createdAt && b.createdAt) {
+                return new Date(b.createdAt) - new Date(a.createdAt);
+            }
+            return Number(b.id) - Number(a.id);
         });
     }
 
@@ -432,7 +436,7 @@ if (typeFilter !== 'All') {
                         <Text className={`text-center text-[22px] font-black ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{item.name}</Text>
                         <Text className={`text-center text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>by {item.provider}</Text>
                         <View className="flex-row flex-wrap justify-center gap-2">
-                            <Pill label={item.status} tone={item.status === 'Active' ? palette.green : item.status === 'Expired' ? palette.danger : palette.orange}/>
+                            <Pill label={item.status === 'Expired' ? 'Inactive' : item.status} tone={item.status === 'Active' ? palette.green : item.status === 'Expired' ? palette.danger : palette.orange}/>
                             <Pill label={item.tag} tone={palette.primary}/>
                         </View>
                     </View>
@@ -573,7 +577,7 @@ if (typeFilter !== 'All') {
                             className={`rounded-full px-4 py-2.5 ${activeStatus === status ? 'bg-brand' : preferences.darkMode ? 'bg-[#111111]' : 'bg-[#f2ebe6]'}`}
                         >
                             <Text className={`text-[12px] font-extrabold ${activeStatus === status ? 'text-white' : preferences.darkMode ? 'text-white' : 'text-ink'}`}>
-                                {status}
+                                {status === 'Expired' ? 'Inactive' : status}
                             </Text>
                         </Pressable>
                     ))}
@@ -882,7 +886,7 @@ if (typeFilter !== 'All') {
                         </View>
                         <View className="absolute bottom-4 right-4 items-end gap-2">
                             <Text className={`text-[12px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{item.deadline}</Text>
-                            <Pill label={item.status} tone={item.status === 'Active' ? palette.green : item.status === 'Expired' ? palette.danger : palette.orange}/>
+                            <Pill label={item.status === 'Expired' ? 'Inactive' : item.status} tone={item.status === 'Active' ? palette.green : item.status === 'Expired' ? palette.danger : palette.orange}/>
                         </View>
                         <View className="flex-row gap-3">
                             <View className="h-[50px] w-[50px] items-center justify-center rounded-[16px]" style={{ backgroundColor: `${palette.green}14` }}>
