@@ -293,12 +293,6 @@ export default function QuizScreen() {
             >
               <Text className={`text-[14px] font-extrabold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>Try Another Quiz</Text>
             </AnimatedPressable>
-            <AnimatedPressable
-              className="flex-1 items-center rounded-[16px] bg-brand px-4 py-4"
-              onPress={() => setQuizResult(null)}
-            >
-              <Text className="text-[14px] font-extrabold text-white">Review Questions</Text>
-            </AnimatedPressable>
           </View>
         </View>
       </Screen>
