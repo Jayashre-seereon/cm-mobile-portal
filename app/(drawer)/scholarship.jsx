@@ -337,8 +337,11 @@ const filtered = useMemo(() => {
         }
     }, [params.selected, scholarships]);
 
+    // Same rule as the user portal: full access unlocks everything, otherwise the server's accessTier decides.
+    const isScholarshipLocked = (item) => !hasFullAccess && String(item?.accessTier || 'locked') === 'locked';
+
     const openScholarship = (item) => {
-                            if (!hasFullAccess && !item.isFree) {
+                            if (isScholarshipLocked(item)) {
                                 setShowUnlockSheet(true);
                                 return;
                             }
@@ -872,8 +875,8 @@ const filtered = useMemo(() => {
                     <Text className={`text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No scholarships available right now.</Text>
                 ) : null}
 
-                {filtered.slice(0, hasFullAccess ? filtered.length : 6).map((item) => {
-                    const detailOpen = hasFullAccess || item.isFree;
+                {filtered.map((item) => {
+                    const detailOpen = !isScholarshipLocked(item);
 
                     return (
                     <AnimatedPressable

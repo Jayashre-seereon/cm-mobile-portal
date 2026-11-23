@@ -80,6 +80,9 @@ function mapScholarshipItem(item, index) {
     createdAt: item?.createdAt ?? item?.created_at ?? item?.addedAt ?? item?.added_at ?? null,
     name: item?.name || 'Unnamed Scholarship',
     isFree: Boolean(item?.is_free ?? item?.isFree),
+    // Same as the user portal: the server decides per scholarship ("full" | "preview" | "locked").
+    accessTier: String(item?.accessTier ?? (item?.is_free ?? item?.isFree ? 'preview' : 'locked')).toLowerCase(),
+    previewEligible: Boolean(item?.previewEligible ?? item?.is_free ?? item?.isFree),
    eligibility: formatEligibility(item?.eligibility),
     amount: formatAmount(item?.price),
     deadline: formatDeadline(item?.deadline),
