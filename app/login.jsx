@@ -9,6 +9,7 @@ import { AnimatedBackground } from '../src/animated-background';
 import { BeeMascot } from '../src/bee-mascot';
 import { palette } from '../src/careermap-data';
 import { AnimatedPressable } from '../src/careermap-ui';
+import KeyboardSafeView from '../src/components/KeyboardSafeView';
 import { ZoomInPage } from '../src/page-transition';
 import { useAuthStore } from '../src/store/auth-store';
 import { formatOtpMobile, getEmailError, getPasswordError, isValidEmail, isValidPassword, mapApiUserToProfile, normalizeMobile } from '../src/utils/auth';
@@ -181,6 +182,7 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <AnimatedBackground />
+      <KeyboardSafeView>
       <ZoomInPage style={{ flex: 1 }}>
         <ScrollView
           className="flex-1"
@@ -346,6 +348,7 @@ export default function LoginScreen() {
           </View>
         </ScrollView>
       </ZoomInPage>
+      </KeyboardSafeView>
     </SafeAreaView>
   );
 }
