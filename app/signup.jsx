@@ -1,14 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiErrorMessage, sendSignupOtp } from '../src/api/authApi';
 import { useAppState } from '../src/app-state';
 import { AnimatedBackground } from '../src/animated-background';
 import { palette } from '../src/careermap-data';
 import { AnimatedPressable } from '../src/careermap-ui';
-import KeyboardSafeView from '../src/components/KeyboardSafeView';
+import KeyboardAwareScroll from '../src/components/KeyboardAwareScroll';
 import { useAuthStore } from '../src/store/auth-store';
 import { PASSWORD_POLICY_MESSAGE, formatOtpMobile, getEmailError, getMobileError, getNewPasswordError, isStrongPassword, isValidEmail, isValidMobileNumber, normalizeMobile } from '../src/utils/auth';
 export default function SignupScreen() {
@@ -131,8 +131,7 @@ export default function SignupScreen() {
     };
     return (<SafeAreaView className="flex-1 bg-transparent">
       <AnimatedBackground />
-      <KeyboardSafeView>
-      <ScrollView className="flex-1" contentContainerClassName="gap-[14px] px-6 py-6" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+      <KeyboardAwareScroll className="flex-1" contentContainerClassName="gap-[14px] px-6 py-6" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <AnimatedPressable onPress={() => router.back()}>
           <Text className={`text-[14px] font-bold ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Back</Text>
         </AnimatedPressable>
@@ -170,7 +169,6 @@ export default function SignupScreen() {
           <Text className="text-[15px] font-extrabold text-white">{isSubmitting ? 'Sending OTP...' : 'Register'}</Text>
         </AnimatedPressable>
         {status.type !== 'idle' ? (<Text className={`text-center text-[12px] font-bold ${status.type === 'error' ? 'text-danger' : 'text-success'}`}>{status.message}</Text>) : null}
-      </ScrollView>
-      </KeyboardSafeView>
+      </KeyboardAwareScroll>
     </SafeAreaView>);
 }

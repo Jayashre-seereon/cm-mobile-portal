@@ -1,14 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, Text, TextInput } from 'react-native';
+import { Text, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { createUserHistoryEntry, getApiErrorMessage, sendOtp, verifyOtp } from '../src/api/authApi';
 import { useAppState } from '../src/app-state';
 import { AnimatedBackground } from '../src/animated-background';
 import { palette } from '../src/careermap-data';
 import { AnimatedPressable } from '../src/careermap-ui';
-import KeyboardSafeView from '../src/components/KeyboardSafeView';
+import KeyboardAwareScroll from '../src/components/KeyboardAwareScroll';
 import { ZoomInPage } from '../src/page-transition';
 import { useAuthStore } from '../src/store/auth-store';
 import { formatOtpMobile, mapApiUserToProfile } from '../src/utils/auth';
@@ -114,9 +114,8 @@ export default function OtpVerifyScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <AnimatedBackground />
-      <KeyboardSafeView>
       <ZoomInPage style={{ flex: 1 }}>
-        <ScrollView className="flex-1" contentContainerClassName="flex-grow items-center justify-center gap-[14px] px-6" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <KeyboardAwareScroll className="flex-1" contentContainerClassName="flex-grow items-center justify-center gap-[14px] px-6" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <AnimatedPressable
             className={`absolute left-6 top-6 h-10 w-10 items-center justify-center rounded-[14px] ${preferences.darkMode ? 'bg-[#111111]' : 'bg-surface'}`}
             onPress={() => router.back()}
@@ -157,9 +156,8 @@ export default function OtpVerifyScreen() {
               {status.message}
             </Text>
           ) : null}
-        </ScrollView>
+        </KeyboardAwareScroll>
       </ZoomInPage>
-      </KeyboardSafeView>
     </SafeAreaView>
   );
 }

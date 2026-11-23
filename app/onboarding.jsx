@@ -1,14 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Animated, Easing, Pressable, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAppState } from '../src/app-state';
 import { BeeMascot } from '../src/bee-mascot';
 import { palette } from '../src/careermap-data';
 import { AnimatedBackground } from '../src/animated-background';
 import { AnimatedPressable } from '../src/careermap-ui';
-import KeyboardSafeView from '../src/components/KeyboardSafeView';
+import KeyboardAwareScroll from '../src/components/KeyboardAwareScroll';
 import { useAuthStore } from '../src/store/auth-store';
 const studentClassOptions = ['Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12', 'Graduate', 'Post Graduate','Other'];
 const streamOptions = ['Science', 'Commerce', 'Arts', 'Other'];
@@ -156,8 +156,7 @@ if (step === 8 && userType === 'student')
 };
     return (<SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}> 
          <AnimatedBackground />
-          <KeyboardSafeView>
-          <ScrollView className="flex-1" contentContainerClassName="flex-grow gap-5 px-6 py-6" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <KeyboardAwareScroll className="flex-1" contentContainerClassName="flex-grow gap-5 px-6 py-6" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <Pressable className={`h-10 w-10 items-center justify-center rounded-[14px] ${preferences.darkMode ? 'bg-[#111111]' : 'bg-surface'}`} onPress={() => {
             if (step > 0) {
                 setStep((value) => value - 1);
@@ -332,8 +331,7 @@ if (step === 8 && userType === 'student')
         <AnimatedPressable className="mt-auto items-center rounded-[18px] bg-brand py-4" disabled={!canProceed()} onPress={next}>
           <ButtonLabel label={step === 0 ? 'Continue' : step === 1 ? 'Start Journey' : step === 8 ? 'Finish' : step === 9 ? 'Continue' : 'Next'} showArrow={step === 0 || step === 9 || (step > 1 && step < 8)}/>
         </AnimatedPressable>
-      </ScrollView>
-          </KeyboardSafeView>
+      </KeyboardAwareScroll>
     </SafeAreaView>);
 }
 function StepInput({ title, icon, value, setValue, placeholder, darkMode, }) {
