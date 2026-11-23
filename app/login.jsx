@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { createUserHistoryEntry, getApiErrorMessage, loginWithPassword, sendOtp } from '../src/api/authApi';
 import { useAppState } from '../src/app-state';
@@ -9,7 +9,7 @@ import { AnimatedBackground } from '../src/animated-background';
 import { BeeMascot } from '../src/bee-mascot';
 import { palette } from '../src/careermap-data';
 import { AnimatedPressable } from '../src/careermap-ui';
-import KeyboardSafeView from '../src/components/KeyboardSafeView';
+import KeyboardAwareScroll from '../src/components/KeyboardAwareScroll';
 import { ZoomInPage } from '../src/page-transition';
 import { useAuthStore } from '../src/store/auth-store';
 import { formatOtpMobile, getEmailError, getPasswordError, isValidEmail, isValidPassword, mapApiUserToProfile, normalizeMobile } from '../src/utils/auth';
@@ -182,9 +182,8 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
       <AnimatedBackground />
-      <KeyboardSafeView>
       <ZoomInPage style={{ flex: 1 }}>
-        <ScrollView
+        <KeyboardAwareScroll
           className="flex-1"
           contentContainerClassName="flex-grow gap-6 px-6 py-6"
           keyboardShouldPersistTaps="handled"
@@ -346,9 +345,8 @@ export default function LoginScreen() {
               By continuing, you agree to Career Map&apos;s Terms of Service and Privacy Policy.
             </Text>
           </View>
-        </ScrollView>
+        </KeyboardAwareScroll>
       </ZoomInPage>
-      </KeyboardSafeView>
     </SafeAreaView>
   );
 }

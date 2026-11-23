@@ -1,14 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, Text, TextInput, View } from 'react-native';
+import { Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getApiErrorMessage, signupUser } from '../src/api/authApi';
 import { useAppState } from '../src/app-state';
 import { palette } from '../src/careermap-data';
 import { AnimatedPressable } from '../src/careermap-ui';
 import { AnimatedBackground } from '../src/animated-background';
-import KeyboardSafeView from '../src/components/KeyboardSafeView';
+import KeyboardAwareScroll from '../src/components/KeyboardAwareScroll';
 import { ZoomInPage } from '../src/page-transition';
 import { useAuthStore } from '../src/store/auth-store';
 import { PASSWORD_POLICY_MESSAGE, buildLandingData, buildUsername, formatDateForApi, formatDateForDisplay, formatOtpMobile, getDateError, getEmailError, getMobileError, getNewPasswordError, isStrongPassword, isValidDateInput, isValidEmail, isValidMobileNumber, normalizeMobile, splitFullName } from '../src/utils/auth';
@@ -229,7 +229,6 @@ export default function ProfileSetupScreen() {
     };
     return (<SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}> 
           <AnimatedBackground />
-            <KeyboardSafeView>
             <ZoomInPage style={{ flex: 1 }}>
             {status.type !== 'idle' ? (<View className="absolute left-4 right-4 top-5 z-20 items-center">
                 <View className={`min-h-12 w-full max-w-[360px] flex-row items-center gap-3 rounded-[22px] px-4 py-3 ${status.type === 'error' ? 'bg-[#fff4f6]' : 'bg-[#eefaf2]'}`} style={{
@@ -245,7 +244,7 @@ export default function ProfileSetupScreen() {
                   <Text className={`flex-1 text-[13px] font-bold ${status.type === 'error' ? 'text-[#8f1d37]' : 'text-[#1f5135]'}`} numberOfLines={2}>{status.message}</Text>
                 </View>
               </View>) : null}
-            <ScrollView className="flex-1" contentContainerClassName="gap-[14px] px-6 py-6" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <KeyboardAwareScroll className="flex-1" contentContainerClassName="gap-[14px] px-6 py-6" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <AnimatedPressable className={`h-10 w-10 items-center justify-center rounded-[14px] ${preferences.darkMode ? 'bg-[#111111]' : 'bg-surface'}`} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={18} color={preferences.darkMode ? '#ffffff' : palette.text}/>
         </AnimatedPressable>
@@ -345,8 +344,7 @@ export default function ProfileSetupScreen() {
         <AnimatedPressable className="mt-3 items-center rounded-[18px] bg-brand py-4" disabled={!isValid || isSubmitting} onPress={handleSubmit}>
           <Text className="text-[15px] font-extrabold text-white">{isSubmitting ? 'Creating Profile...' : 'Complete Profile'}</Text>
         </AnimatedPressable>
-      </ScrollView>
+      </KeyboardAwareScroll>
       </ZoomInPage>
-            </KeyboardSafeView>
     </SafeAreaView>);
 }
