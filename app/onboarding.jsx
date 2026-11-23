@@ -8,6 +8,7 @@ import { BeeMascot } from '../src/bee-mascot';
 import { palette } from '../src/careermap-data';
 import { AnimatedBackground } from '../src/animated-background';
 import { AnimatedPressable } from '../src/careermap-ui';
+import KeyboardSafeView from '../src/components/KeyboardSafeView';
 import { useAuthStore } from '../src/store/auth-store';
 const studentClassOptions = ['Class 8', 'Class 9', 'Class 10', 'Class 11', 'Class 12', 'Graduate', 'Post Graduate','Other'];
 const streamOptions = ['Science', 'Commerce', 'Arts', 'Other'];
@@ -154,8 +155,9 @@ if (step === 8 && userType === 'student')
     setStep(step + 1);
 };
     return (<SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}> 
-         <AnimatedBackground /> 
-          <ScrollView className="flex-1" contentContainerClassName="flex-grow gap-5 px-6 py-6" showsVerticalScrollIndicator={false}>
+         <AnimatedBackground />
+          <KeyboardSafeView>
+          <ScrollView className="flex-1" contentContainerClassName="flex-grow gap-5 px-6 py-6" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <Pressable className={`h-10 w-10 items-center justify-center rounded-[14px] ${preferences.darkMode ? 'bg-[#111111]' : 'bg-surface'}`} onPress={() => {
             if (step > 0) {
                 setStep((value) => value - 1);
@@ -331,6 +333,7 @@ if (step === 8 && userType === 'student')
           <ButtonLabel label={step === 0 ? 'Continue' : step === 1 ? 'Start Journey' : step === 8 ? 'Finish' : step === 9 ? 'Continue' : 'Next'} showArrow={step === 0 || step === 9 || (step > 1 && step < 8)}/>
         </AnimatedPressable>
       </ScrollView>
+          </KeyboardSafeView>
     </SafeAreaView>);
 }
 function StepInput({ title, icon, value, setValue, placeholder, darkMode, }) {

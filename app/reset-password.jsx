@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useMemo, useState } from 'react';
-import { Text, TextInput, View } from 'react-native';
+import { ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { resetPassword } from '../src/api/forgotPasswordApi';
 import { getApiErrorMessage } from '../src/api/authApi';
@@ -9,6 +9,7 @@ import { useAppState } from '../src/app-state';
 import { AnimatedBackground } from '../src/animated-background';
 import { palette } from '../src/careermap-data';
 import { AnimatedPressable } from '../src/careermap-ui';
+import KeyboardSafeView from '../src/components/KeyboardSafeView';
 import { PASSWORD_POLICY_MESSAGE, isStrongPassword } from '../src/utils/auth';
 
 export default function ResetPasswordScreen() {
@@ -78,7 +79,8 @@ export default function ResetPasswordScreen() {
   return (
     <SafeAreaView className="flex-1 bg-transparent">
       <AnimatedBackground />
-      <View className="flex-1 gap-4 px-6 py-6">
+      <KeyboardSafeView>
+      <ScrollView className="flex-1" contentContainerClassName="flex-grow gap-4 px-6 py-6" keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
         <AnimatedPressable
           className={`h-10 w-10 items-center justify-center rounded-[14px] ${preferences.darkMode ? 'bg-[#312636]' : 'bg-surface'}`}
           onPress={() => router.back()}
@@ -157,7 +159,8 @@ export default function ResetPasswordScreen() {
             <Text className="text-[13px] font-bold text-brand">Back to login</Text>
           </AnimatedPressable>
         </View>
-      </View>
+      </ScrollView>
+      </KeyboardSafeView>
     </SafeAreaView>
   );
 }
