@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "727933889387",
+    "project_id": "careermap-aac7b",
+    "storage_bucket": "careermap-aac7b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:727933889387:android:f98685e321b360586b3a2e",
+        "android_client_info": {
+          "package_name": "com.global.careermap"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAQ3ziYh_0LREaZHex6w8Z6VmabwS1LFZA"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

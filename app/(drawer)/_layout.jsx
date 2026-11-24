@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
 import { Text, View } from 'react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAppState } from '../../src/app-state';
 import { palette } from '../../src/careermap-data';
@@ -11,6 +11,7 @@ import { AppHeader } from '../../src/app-header';
 import FloatingContactActions from '../../src/components/FloatingContactActions';
 import { UnlockBottomSheet } from '../../src/careermap-ui';
 import { openSubscriptionPrompt } from '../../src/subscription-flow';
+import { registerForPushNotifications } from '../../src/utils/pushNotifications';
 
 const drawerModuleAccess = {
     library: { title: 'Career Archive', match: ['career archive', 'career library'], path: '/(drawer)/(tabs)/library' },
@@ -27,6 +28,20 @@ const drawerModuleAccess = {
 export default function DrawerRoot() {
     const { preferences, unreadNotificationsCount } = useAppState();
     const [lockedModule, setLockedModule] = useState(null);
+    // This layout only exists once the user is logged in. Ask for notification permission and get the
+    // push token (does nothing on phones whose APK has no push support, or on an emulator).
+    useEffect(() => {
+        let cancelled = false;
+        registerForPushNotifications().then((token) => {
+            // NEXT STEP: send `token` to the backend so it can be saved per user and used to send pushes.
+            if (token && !cancelled) {
+                console.log('Expo push token:', token);
+            }
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
     const renderDrawerIcon = (name) => {
         const DrawerIcon = ({ color, size }) => (<View className="items-center justify-center">
         <Ionicons name={name} color={color} size={size}/>
