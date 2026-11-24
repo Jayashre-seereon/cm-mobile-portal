@@ -8,6 +8,7 @@ import { palette } from '../../src/careermap-data';
 import { AnimatedPressable, Screen } from '../../src/careermap-ui';
 import { StaggerFadeUpItem } from '../../src/page-transition';
 import { useAuthStore } from '../../src/store/auth-store';
+import { removePushTokenFromBackend } from '../../src/utils/pushNotifications';
 export default function SettingsScreen() {
     const { preferences, requestProfileEdit, toggleDarkMode, userProfile } = useAppState();
     const { view: initialView } = useLocalSearchParams();
@@ -271,6 +272,7 @@ export default function SettingsScreen() {
                 }
                 try {
                     setIsLoggingOut(true);
+                    await removePushTokenFromBackend();
                     await logoutUser(accessToken);
                 }
                 catch (_error) {

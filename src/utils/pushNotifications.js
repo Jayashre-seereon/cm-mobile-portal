@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import { removePushToken, savePushToken } from '../api/notificationApi';
 
 // Push notifications (Firebase Cloud Messaging, delivered through Expo).
 //
@@ -73,5 +74,46 @@ export async function registerForPushNotifications() {
     catch (error) {
         console.log('Push registration skipped:', error?.message || error);
         return null;
+    }
+}
+
+// The token this phone has saved on the backend in this app session (needed to remove it on logout).
+let savedToken = '';
+
+/**
+ * Gets this phone's push token and saves it on the backend for the logged-in user, so the backend can
+ * send phone notifications. Call it once the user is logged in. Never throws.
+ */
+export async function syncPushTokenWithBackend() {
+    const token = await registerForPushNotifications();
+    if (!token) {
+        return null;
+    }
+    try {
+        await savePushToken(token);
+        savedToken = token;
+        return token;
+    }
+    catch (error) {
+        console.log('Could not save push token:', error?.response?.data?.message || error?.message || error);
+        return null;
+    }
+}
+
+/**
+ * Removes this phone's push token from the backend. Call it on logout, BEFORE the session is cleared, so the
+ * next person using this phone does not get this user's notifications. Never throws.
+ */
+export async function removePushTokenFromBackend() {
+    const token = savedToken;
+    if (!token) {
+        return;
+    }
+    savedToken = '';
+    try {
+        await removePushToken(token);
+    }
+    catch (error) {
+        console.log('Could not remove push token:', error?.response?.data?.message || error?.message || error);
     }
 }

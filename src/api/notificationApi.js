@@ -1,5 +1,16 @@
+import { Platform } from 'react-native';
 import api from './axios';
 import { useAuthStore } from '../store/auth-store';
+
+// Saves this phone's push token for the logged-in user, so the backend can send phone notifications.
+export async function savePushToken(token) {
+  await api.post('/notification/push-token', { token, platform: Platform.OS }, { timeout: 15000 });
+}
+
+// Removes this phone's push token (called on logout). Short timeout: logging out must never feel stuck.
+export async function removePushToken(token) {
+  await api.delete('/notification/push-token', { params: { token }, timeout: 5000 });
+}
 
 function stripHtml(value) {
   if (!value) {
