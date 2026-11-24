@@ -11,7 +11,8 @@ import { AppHeader } from '../../src/app-header';
 import FloatingContactActions from '../../src/components/FloatingContactActions';
 import { UnlockBottomSheet } from '../../src/careermap-ui';
 import { openSubscriptionPrompt } from '../../src/subscription-flow';
-import { registerForPushNotifications } from '../../src/utils/pushNotifications';
+import { useAuthStore } from '../../src/store/auth-store';
+import { syncPushTokenWithBackend } from '../../src/utils/pushNotifications';
 
 const drawerModuleAccess = {
     library: { title: 'Career Archive', match: ['career archive', 'career library'], path: '/(drawer)/(tabs)/library' },
@@ -28,20 +29,16 @@ const drawerModuleAccess = {
 export default function DrawerRoot() {
     const { preferences, unreadNotificationsCount } = useAppState();
     const [lockedModule, setLockedModule] = useState(null);
-    // This layout only exists once the user is logged in. Ask for notification permission and get the
-    // push token (does nothing on phones whose APK has no push support, or on an emulator).
+    const hasSession = useAuthStore((state) => state.hasAuthenticatedSession);
+    // Once the user is logged in: ask for notification permission, get this phone's push token and save it on
+    // the backend, so deadline reminders and notices also arrive as phone notifications. It does nothing on
+    // phones whose APK has no push support, or on an emulator. The token is removed again on logout.
     useEffect(() => {
-        let cancelled = false;
-        registerForPushNotifications().then((token) => {
-            // NEXT STEP: send `token` to the backend so it can be saved per user and used to send pushes.
-            if (token && !cancelled) {
-                console.log('Expo push token:', token);
-            }
-        });
-        return () => {
-            cancelled = true;
-        };
-    }, []);
+        if (!hasSession) {
+            return;
+        }
+        void syncPushTokenWithBackend();
+    }, [hasSession]);
     const renderDrawerIcon = (name) => {
         const DrawerIcon = ({ color, size }) => (<View className="items-center justify-center">
         <Ionicons name={name} color={color} size={size}/>

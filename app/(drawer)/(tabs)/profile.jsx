@@ -9,6 +9,7 @@ import { AnimatedPressable, Pill, Screen } from '../../../src/careermap-ui';
 import { StaggerFadeUpItem } from '../../../src/page-transition';
 import { formatDateForApi, formatDateForDisplay, formatPhone, getDateError, getDisplayName, mapApiUserToProfile, mergeServerProfile, splitFullName } from '../../../src/utils/auth';
 import { useAuthStore } from '../../../src/store/auth-store';
+import { removePushTokenFromBackend } from '../../../src/utils/pushNotifications';
 export default function ProfileScreen() {
     const { activePlanId, bookings, hasActiveSubscription, onboarding, preferences, profileEditRequestKey, requestProfileEdit, savedCareers, saveUserProfile, subscriptionRecords, testHistory, toggleDarkMode, userProfile, } = useAppState();
     const authUser = useAuthStore((state) => state.user);
@@ -445,6 +446,7 @@ export default function ProfileScreen() {
                 }
                 try {
                     setIsLoggingOut(true);
+                    await removePushTokenFromBackend();
                     await logoutUser(accessToken);
                 }
                 catch (_error) {
