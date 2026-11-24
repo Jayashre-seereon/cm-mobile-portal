@@ -43,3 +43,7 @@ app-example
 # generated native folders
 /ios
 /android
+
+# Firebase service-account private keys: upload them to Expo/Firebase only, NEVER commit them
+*-firebase-adminsdk-*.json
+service-account*.json
