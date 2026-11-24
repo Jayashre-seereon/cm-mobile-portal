@@ -12,7 +12,7 @@ import FloatingContactActions from '../../src/components/FloatingContactActions'
 import { UnlockBottomSheet } from '../../src/careermap-ui';
 import { openSubscriptionPrompt } from '../../src/subscription-flow';
 import { useAuthStore } from '../../src/store/auth-store';
-import { syncPushTokenWithBackend } from '../../src/utils/pushNotifications';
+import { listenForNotificationTaps, syncPushTokenWithBackend } from '../../src/utils/pushNotifications';
 
 const drawerModuleAccess = {
     library: { title: 'Career Archive', match: ['career archive', 'career library'], path: '/(drawer)/(tabs)/library' },
@@ -38,6 +38,23 @@ export default function DrawerRoot() {
             return;
         }
         void syncPushTokenWithBackend();
+    }, [hasSession]);
+    // Tapping a phone notification opens the Notifications screen, where the same notice is listed.
+    useEffect(() => {
+        if (!hasSession) {
+            return undefined;
+        }
+        let openTimer = null;
+        const stopListening = listenForNotificationTaps(() => {
+            // Short delay: when the app was closed, give the navigator time to finish starting up first.
+            openTimer = setTimeout(() => router.push('/(drawer)/notifications'), 600);
+        });
+        return () => {
+            stopListening();
+            if (openTimer) {
+                clearTimeout(openTimer);
+            }
+        };
     }, [hasSession]);
     const renderDrawerIcon = (name) => {
         const DrawerIcon = ({ color, size }) => (<View className="items-center justify-center">

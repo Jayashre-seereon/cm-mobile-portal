@@ -77,6 +77,46 @@ export async function registerForPushNotifications() {
     }
 }
 
+// Taps already handled in this app session, so the same tap is never acted on twice (for example when the
+// layout mounts again after a logout and login).
+const handledTapIds = new Set();
+
+/**
+ * Calls `onTap(data)` when the user taps a push notification: while the app is open, in the background, or
+ * when the app was closed and got opened by the tap. Returns a function that stops listening. Does nothing
+ * on phones whose APK has no push support.
+ */
+export function listenForNotificationTaps(onTap) {
+    if (Platform.OS === 'web') {
+        return () => { };
+    }
+    const modules = loadNativeModules();
+    if (!modules) {
+        return () => { };
+    }
+    const { Notifications } = modules;
+    const handle = (response) => {
+        const id = response?.notification?.request?.identifier;
+        if (!response || (id && handledTapIds.has(id))) {
+            return;
+        }
+        if (id) {
+            handledTapIds.add(id);
+        }
+        onTap(response.notification?.request?.content?.data || {});
+    };
+    try {
+        const subscription = Notifications.addNotificationResponseReceivedListener(handle);
+        // The app was closed and the tap opened it: the tap happened before this listener existed.
+        Notifications.getLastNotificationResponseAsync().then(handle).catch(() => { });
+        return () => subscription.remove();
+    }
+    catch (error) {
+        console.log('Could not listen for notification taps:', error?.message || error);
+        return () => { };
+    }
+}
+
 // The token this phone has saved on the backend in this app session (needed to remove it on logout).
 let savedToken = '';
 
