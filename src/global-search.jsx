@@ -1,3 +1,5 @@
+import { loadSearchPlans, matchPlans } from './utils/planSearch';
+import { getPlans } from './api/planApi';
 import { getResultSubtitle } from './utils/searchResultSubtitle';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -94,7 +96,7 @@ function getTypeConfig(item = {}) {
     const group = String(item.group || '').toLowerCase();
 
     if (type === 'module' || group === 'modules') {
-        return { label: 'Module', color: palette.primary };
+        return { label: item.isPlan ? 'Plan' : 'Module', color: palette.primary };
     }
 
     if (['stream', 'category', 'secondcategory', 'subcategory', 'careerpath'].includes(type) || group === 'careers' || group === 'careerpaths') {
@@ -324,6 +326,12 @@ export function GlobalSearch({ visible, onClose }) {
                             badge: 'Module',
                             navigation: { path: module.route },
                         }));
+                    // Subscription plans (name / price / validity / modules), cached between searches.
+                    const plans = await loadSearchPlans(getPlans);
+                    if (requestIdRef.current !== requestId) {
+                        return;
+                    }
+                    moduleResults.push(...matchPlans(plans, trimmed, '/(drawer)/subscription'));
                     const results = [...moduleResults, ...mergedEntityResults];
                     const grouped = { ...(response.grouped || {}), modules: moduleResults };
                     if (normalizedInstitutes.length) grouped.institutions = normalizedInstitutes;
