@@ -1,3 +1,4 @@
+import { getResultSubtitle } from './utils/searchResultSubtitle';
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Image, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
@@ -5,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { globalSearch } from './api/searchApi';
 import { useAppState } from './app-state';
 import { moduleCards, palette } from './careermap-data';
+
 import { UnlockBottomSheet } from './careermap-ui';
 import { openSubscriptionPrompt } from './subscription-flow';
 import { getPreviewAccessKind, loadPreviewFreeKeys, resolvePreviewAccess } from './utils/previewAccess';
@@ -19,6 +21,18 @@ import {
     resolveSearchTarget,
 } from './utils/searchNavigation';
 
+
+// Screens that are searchable as modules but are not dashboard module cards (adding them to
+// moduleCards would add a duplicate card on the home screen).
+const SEARCH_ONLY_MODULES = [
+    {
+        title: 'Subscription',
+        subtitle: 'View subscription plans and unlock premium modules.',
+        route: '/(drawer)/subscription',
+        keywords: ['subscriptions', 'plans', 'pricing', 'premium', 'upgrade'],
+    },
+];
+const SEARCHABLE_MODULES = [...moduleCards, ...SEARCH_ONLY_MODULES];
 // Same groups, labels and badges as the web portal's GlobalSearchBar.
 const CATEGORY_TABS = [
     { key: 'all', label: 'All' },
@@ -298,8 +312,9 @@ export function GlobalSearch({ visible, onClose }) {
                         ...entityResults.filter((item) => !instituteIds.has(String(item?.id ?? item?.navigation?.id ?? item?.title))),
                         ...normalizedInstitutes,
                     ];
-                    const moduleResults = moduleCards
-                        .filter((module) => module.title.toLowerCase().includes(normalizedQuery))
+                    const moduleResults = SEARCHABLE_MODULES
+                        .filter((module) => [module.title, ...(module.keywords || [])]
+                            .some((text) => text.toLowerCase().includes(normalizedQuery)))
                         .map((module) => ({
                             id: `module:${module.route}`,
                             title: module.title,
@@ -429,7 +444,7 @@ export function GlobalSearch({ visible, onClose }) {
                 {accessBadge.checking ? <ActivityIndicator size="small" color={accessBadge.color} style={{ width: 10, height: 10, transform: [{ scale: 0.5 }] }}/> : <Ionicons name={accessBadge.icon} size={10} color={accessBadge.color}/>}
                 <Text numberOfLines={1} className="text-[10px] font-bold uppercase" style={{ color: accessBadge.color }}>{accessBadge.label}</Text>
               </View>) : null}
-            {item?.subtitle || item?.description ? (<Text numberOfLines={1} className={`flex-1 text-[12px] ${muted}`}>{item.subtitle || item.description}</Text>) : null}
+            {getResultSubtitle(item) || item?.description ? (<Text numberOfLines={1} className={`flex-1 text-[12px] ${muted}`}>{getResultSubtitle(item) || item.description}</Text>) : null}
           </View>
         </View>
         {openingKey === rowKey ? <ActivityIndicator size="small" color={palette.primary}/> : accessBadge?.locked ? <Ionicons name="lock-closed" size={16} color="#e57373"/> : <Ionicons name="chevron-forward" size={18} color={palette.muted}/>}
