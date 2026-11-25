@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { globalSearch } from './api/searchApi';
 import { useAppState } from './app-state';
 import { moduleCards, palette } from './careermap-data';
+
 import { UnlockBottomSheet } from './careermap-ui';
 import { openSubscriptionPrompt } from './subscription-flow';
 import { getPreviewAccessKind, loadPreviewFreeKeys, resolvePreviewAccess } from './utils/previewAccess';
@@ -20,6 +21,18 @@ import {
     resolveSearchTarget,
 } from './utils/searchNavigation';
 
+
+// Screens that are searchable as modules but are not dashboard module cards (adding them to
+// moduleCards would add a duplicate card on the home screen).
+const SEARCH_ONLY_MODULES = [
+    {
+        title: 'Subscription',
+        subtitle: 'View subscription plans and unlock premium modules.',
+        route: '/(drawer)/subscription',
+        keywords: ['subscriptions', 'plans', 'pricing', 'premium', 'upgrade'],
+    },
+];
+const SEARCHABLE_MODULES = [...moduleCards, ...SEARCH_ONLY_MODULES];
 // Same groups, labels and badges as the web portal's GlobalSearchBar.
 const CATEGORY_TABS = [
     { key: 'all', label: 'All' },
@@ -299,8 +312,9 @@ export function GlobalSearch({ visible, onClose }) {
                         ...entityResults.filter((item) => !instituteIds.has(String(item?.id ?? item?.navigation?.id ?? item?.title))),
                         ...normalizedInstitutes,
                     ];
-                    const moduleResults = moduleCards
-                        .filter((module) => module.title.toLowerCase().includes(normalizedQuery))
+                    const moduleResults = SEARCHABLE_MODULES
+                        .filter((module) => [module.title, ...(module.keywords || [])]
+                            .some((text) => text.toLowerCase().includes(normalizedQuery)))
                         .map((module) => ({
                             id: `module:${module.route}`,
                             title: module.title,
