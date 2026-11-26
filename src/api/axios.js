@@ -89,23 +89,86 @@ const refreshClient = createAxios({
 
 let refreshPromise = null;
 
-async function revokeServerSession(token) {
-  if (!token) {
+// Routes that never use (or refresh) the logged-in user's session. '/user/signup' is authorised by the
+// short-lived OTP temp token: when that expires, refreshing the session makes no sense and used to log
+// the guest out, wiping the signup form. '/auth/logout' must never trigger a refresh either.
+function isPublicAuthRoute(requestUrl) {
+  return (
+    requestUrl.includes('/auth/login/password') ||
+    requestUrl.includes('/auth/send-otp') ||
+    requestUrl.includes('/auth/verify-otp') ||
+    requestUrl.includes('/auth/logout') ||
+    requestUrl.includes('/user/signup') ||
+    requestUrl.includes('/user/forgot-password') ||
+    requestUrl.includes('/user/reset-password')
+  );
+}
+
+// Same rule as the user portal: only an explicit rejection of the refresh token (401/403), or having no
+// refresh token at all, ends the session. Timeouts, offline, cold starts and 5xx keep the user signed in.
+function isRefreshRejected(refreshError) {
+  if (refreshError?.sessionChanged) {
+    return false;
+  }
+
+  const refreshStatus = refreshError?.response?.status;
+  if (refreshStatus) {
+    return refreshStatus === 401 || refreshStatus === 403;
+  }
+
+  return !refreshError?.request;
+}
+
+// Tells the server to revoke this session's refresh token (sent in the body: the app has no cookie).
+async function revokeServerSession(accessToken, refreshToken) {
+  if (!accessToken && !refreshToken) {
     return;
   }
 
   try {
     await refreshClient.post(
       '/auth/logout',
-      {},
+      refreshToken ? { refreshToken } : {},
       {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        timeout: 8000,
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
       }
     );
   } catch {
     // Ignore logout failures and continue clearing the local session.
+  }
+}
+
+// Work to do before a forced logout clears the session (the push-notification module registers removal
+// of this phone's push token here, so the signed-out user's notifications stop arriving).
+let beforeForcedLogoutHandler = null;
+let forcedLogoutInProgress = false;
+
+export function setBeforeForcedLogout(handler) {
+  beforeForcedLogoutHandler = typeof handler === 'function' ? handler : null;
+}
+
+async function forceLogout() {
+  const { accessToken, refreshToken } = useAuthStore.getState();
+  if (forcedLogoutInProgress || (!accessToken && !refreshToken)) {
+    return;
+  }
+
+  forcedLogoutInProgress = true;
+  try {
+    if (beforeForcedLogoutHandler) {
+      await Promise.race([
+        Promise.resolve().then(beforeForcedLogoutHandler).catch(() => {}),
+        new Promise((resolve) => setTimeout(resolve, 6000)),
+      ]);
+    }
+    void revokeServerSession(accessToken, refreshToken);
+    // Only clear the session if it is still the one that failed (the user may have logged in again meanwhile).
+    if (useAuthStore.getState().refreshToken === refreshToken) {
+      useAuthStore.getState().logout();
+    }
+  } finally {
+    forcedLogoutInProgress = false;
   }
 }
 
@@ -138,6 +201,14 @@ async function refreshAccessToken() {
       },
     }
   );
+
+  // The user logged out (or another account logged in) while this refresh was in flight: drop the
+  // result instead of writing a token back to storage and reviving the old session.
+  if (useAuthStore.getState().refreshToken !== refreshToken) {
+    const changed = new Error('Session changed during token refresh');
+    changed.sessionChanged = true;
+    throw changed;
+  }
 
   const authPayload = extractAuthPayload(response?.data);
   if (!authPayload.accessToken) {
@@ -176,9 +247,9 @@ export async function ensureAccessToken() {
   try {
     return await refreshPromise;
   } catch (error) {
-    const currentToken = useAuthStore.getState().accessToken;
-    await revokeServerSession(currentToken);
-    useAuthStore.getState().logout();
+    if (isRefreshRejected(error)) {
+      await forceLogout();
+    }
     throw error;
   }
 }
@@ -187,12 +258,7 @@ api.interceptors.request.use(
   async (config) => {
     const token = useAuthStore.getState().accessToken;
     const requestUrl = String(config.url || '');
-    const isPublicAuthRoute =
-      requestUrl.includes('/auth/login/password') ||
-      requestUrl.includes('/auth/send-otp') ||
-      requestUrl.includes('/auth/verify-otp') ||
-      requestUrl.includes('/user/forgot-password') ||
-      requestUrl.includes('/user/reset-password');
+    const publicAuthRoute = isPublicAuthRoute(requestUrl);
     const explicitAuthorization =
       config.headers?.Authorization || config.headers?.authorization;
 
@@ -200,7 +266,7 @@ api.interceptors.request.use(
       return config;
     }
 
-    if (isPublicAuthRoute) {
+    if (publicAuthRoute) {
       if (config.headers?.Authorization) {
         delete config.headers.Authorization;
       }
@@ -245,17 +311,13 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
-    if (
-      requestUrl.includes('/auth/login/password') ||
-      requestUrl.includes('/auth/send-otp') ||
-      requestUrl.includes('/auth/verify-otp') ||
-      requestUrl.includes('/user/forgot-password') ||
-      requestUrl.includes('/user/reset-password')
-    ) {
+    if (isPublicAuthRoute(requestUrl) || requestUrl.includes(AUTH_REFRESH_ENDPOINT)) {
       return Promise.reject(error);
     }
 
-    if (requestUrl.includes(AUTH_REFRESH_ENDPOINT)) {
+    // Requests made while a forced logout is cleaning up (e.g. removing the push token) must not start
+    // another refresh / logout round.
+    if (forcedLogoutInProgress) {
       return Promise.reject(error);
     }
 
@@ -274,10 +336,13 @@ api.interceptors.response.use(
 
       return api.request(originalRequest);
     } catch (refreshError) {
-      const currentToken = useAuthStore.getState().accessToken;
-      await revokeServerSession(currentToken);
-      useAuthStore.getState().logout();
-      return Promise.reject(refreshError);
+      if (isRefreshRejected(refreshError)) {
+        await forceLogout();
+        return Promise.reject(refreshError);
+      }
+      // Temporary problem (offline, timeout, server waking up): keep the session and report the
+      // original request's failure so the screen can show its normal error / retry.
+      return Promise.reject(refreshError?.sessionChanged ? error : refreshError);
     }
   }
 );

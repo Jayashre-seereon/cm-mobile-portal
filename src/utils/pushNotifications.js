@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { removePushToken, savePushToken } from '../api/notificationApi';
+import { setBeforeForcedLogout } from '../api/axios';
 
 // Push notifications (Firebase Cloud Messaging, delivered through Expo).
 //
@@ -141,19 +142,58 @@ export async function syncPushTokenWithBackend() {
 }
 
 /**
+ * This phone's push token without asking for anything: used on logout when the app restarted and the sync
+ * of this session has not finished (or failed), so `savedToken` is empty. Returns '' when not available.
+ */
+async function getExistingPushToken() {
+    if (Platform.OS === 'web') {
+        return '';
+    }
+    const modules = loadNativeModules();
+    if (!modules) {
+        return '';
+    }
+    const { Notifications, Device } = modules;
+    try {
+        if (!Device.isDevice) {
+            return '';
+        }
+        const { status } = await Notifications.getPermissionsAsync();
+        if (status !== 'granted') {
+            return ''; // no permission: no token was ever saved for this phone
+        }
+        const projectId = Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
+        if (!projectId) {
+            return '';
+        }
+        const { data } = await Notifications.getExpoPushTokenAsync({ projectId });
+        return data || '';
+    }
+    catch {
+        return '';
+    }
+}
+
+/**
  * Removes this phone's push token from the backend. Call it on logout, BEFORE the session is cleared, so the
  * next person using this phone does not get this user's notifications. Never throws.
  */
 export async function removePushTokenFromBackend() {
-    const token = savedToken;
+    const token = savedToken || (await getExistingPushToken());
     if (!token) {
         return;
     }
-    savedToken = '';
     try {
         await removePushToken(token);
+        // Forget it only once the server really removed it, so a failed attempt can be retried.
+        if (savedToken === token) {
+            savedToken = '';
+        }
     }
     catch (error) {
         console.log('Could not remove push token:', error?.response?.data?.message || error?.message || error);
     }
 }
+
+// Automatic logouts (the session was rejected by the server) also unregister this phone.
+setBeforeForcedLogout(removePushTokenFromBackend);

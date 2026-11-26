@@ -127,7 +127,12 @@ function mapNotificationItem(item, index) {
 
 export async function getNotifications() {
   const response = await api.get('/notification/user/all');
-  const items = Array.isArray(response?.data?.data) ? response.data.data : [];
+  // The backend answers a failure with HTTP 200 + { success: false, message }: treat that (or
+  // a missing list) as an error so the screen shows it instead of "No notifications yet".
+  if (response?.data?.success === false || !Array.isArray(response?.data?.data)) {
+    throw new Error(response?.data?.message || 'Failed to load notifications');
+  }
+  const items = response.data.data;
   const user = useAuthStore.getState().user;
   const userId = user?.id ?? user?._id ?? user?.userId;
   const userTarget = userId == null ? '' : `user:${userId}`.toLowerCase();

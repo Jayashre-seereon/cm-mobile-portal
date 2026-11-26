@@ -1,13 +1,15 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
-import { Image, Linking, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { useAppState } from '../../src/app-state';
 import { palette } from '../../src/careermap-data';
 import { getCategories, getInstituteById, getInstituteFilters, getInstitutes } from '../../src/api/instituteApi';
 import { checkModuleAccess, getModules } from '../../src/api/moduleAccessApi';
 import { AnimatedPressable, Screen, SectionHeader, UnlockBottomSheet } from '../../src/careermap-ui';
-import { useSearchDeepLink } from '../../src/utils/searchNavigation';
+import { useSearchDeepLink, VERIFY_FAILED_HEADING, VERIFY_FAILED_MESSAGE } from '../../src/utils/searchNavigation';
+import { openExternalUrl } from '../../src/utils/openExternalUrl';
+import { openSubscriptionPrompt } from '../../src/subscription-flow';
 import { buildFreeKeys, isPreviewFree, loadPreviewFreeKeys, PREVIEW_MODULES } from '../../src/utils/previewAccess';
 
 const getInstituteInitials = (name) => {
@@ -105,6 +107,8 @@ export default function InstituteScreen() {
     const [accessMode, setAccessMode] = useState('preview');
     const [directoryFreeKeys, setDirectoryFreeKeys] = useState(null);
     const [moduleAccessResolved, setModuleAccessResolved] = useState(false);
+    const [accessCheckFailed, setAccessCheckFailed] = useState(false);
+    const [accessRetryToken, setAccessRetryToken] = useState(0);
     const [showUnlockSheet, setShowUnlockSheet] = useState(false);
     const [page, setPage] = useState(1);
     const [pagination, setPagination] = useState(null);
@@ -194,10 +198,21 @@ const [categorySearchQuery, setCategorySearchQuery] = useState('');
             isMounted = false;
         };
     }, []);
+    // Fail closed (same as the user portal and global search): full access only when the server
+    // explicitly answers "full". A missing module or a failed check keeps the preview rules
+    // (first free institutes only) and offers a retry.
     useEffect(() => {
         let isMounted = true;
+        const failClosed = () => {
+            if (!isMounted) return;
+            setHasFullAccess(false);
+            setAccessMode('preview');
+            setAccessCheckFailed(true);
+            setModuleAccessResolved(true);
+        };
         const resolveModuleAccess = async () => {
             try {
+                setAccessCheckFailed(false);
                 let moduleId = resolvedModuleId;
                 if (!Number.isFinite(moduleId)) {
                     const modules = await getModules();
@@ -205,34 +220,26 @@ const [categorySearchQuery, setCategorySearchQuery] = useState('');
                     moduleId = Number(matched?.id);
                 }
                 if (!Number.isFinite(moduleId)) {
-                    if (isMounted) {
-                        setHasFullAccess(true);
-                        setAccessMode('full');
-                        setModuleAccessResolved(true);
-                    }
+                    failClosed();
                     return;
                 }
                 const response = await checkModuleAccess(moduleId);
                 if (!isMounted) return;
                 const mode = String(response?.mode || '').toLowerCase();
-                const isFull = mode === 'full' || mode === 'unlocked';
+                const isFull = response?.allowed !== false && (mode === 'full' || mode === 'unlocked');
                 setHasFullAccess(isFull);
-                setAccessMode(isFull ? 'full' : mode === 'locked' ? 'locked' : 'preview');
+                setAccessMode(isFull ? 'full' : (mode === 'locked' || response?.allowed === false) ? 'locked' : 'preview');
                 setModuleAccessResolved(true);
             }
             catch {
-                if (isMounted) {
-                    setHasFullAccess(true);
-                    setAccessMode('full');
-                    setModuleAccessResolved(true);
-                }
+                failClosed();
             }
         };
         resolveModuleAccess();
         return () => {
             isMounted = false;
         };
-    }, [resolvedModuleId]);
+    }, [resolvedModuleId, accessRetryToken]);
     // In preview the free institutes are the first ones of the FULL directory (page 1, no
     // filters) - never the first ones of the filtered view - so filtering or pinning a
     // search hit can't unlock an institute.
@@ -350,15 +357,14 @@ const searchableStateOptions = useMemo(() => {
     return source.filter((o) => String(o).toLowerCase().includes(query));
 }, [stateOptions, stateSearchQuery]);
 
-useEffect(() => {
+// A filter change and its page / state reset happen in the same handler, so one tap sends one
+// request (resetting from an effect fetched the old page first, then again).
+const selectCountry = (value) => {
+    setCountryFilter(value);
     setStateFilter('All');
     setStateSearchQuery('');
     setPage(1);
-}, [countryFilter]);
-
-useEffect(() => {
-    setPage(1);
-}, [categoryFilter, stateFilter, typeFilter]);
+};
 
 const searchableCategoryOptions = useMemo(() => {
     const query = categorySearchQuery.trim().toLowerCase();
@@ -368,34 +374,10 @@ const searchableCategoryOptions = useMemo(() => {
 
 const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters ? 'filters' : 'plain'}`;
    
-    const filtered = useMemo(() => {
-        let source = [...institutes];
-
-        if (countryFilter !== 'All') {
-            source = source.filter((item) => normalizeFilterValue(countryFilter) === 'other'
-                ? normalizeFilterValue(item.country) !== 'india'
-                : normalizeFilterValue(item.country) === normalizeFilterValue(countryFilter));
-        }
-
-        if (typeFilter !== 'All') {
-            source = source.filter((item) => normalizeFilterValue(item.type) === normalizeFilterValue(typeFilter));
-        }
-
-        if (stateFilter !== 'All') {
-            source = source.filter((item) => normalizeFilterValue(item.state) === normalizeFilterValue(stateFilter));
-        }
-
-        if (categoryFilter !== 'All') {
-            source = source.filter((item) => {
-                const category = item.categoryObj || item.category;
-                const categoryId = item.categoryId ?? category?.id ?? category;
-                const categoryName = item.categoryName || category?.title || category?.name || category;
-                return String(categoryId) === String(categoryFilter) || normalizeFilterValue(categoryName) === normalizeFilterValue(categoryFilter);
-            });
-        }
-
-        return source;
-    }, [categoryFilter, institutes, countryFilter, stateFilter, typeFilter]);
+    // The server already applies category / country / state / type (with its Govt/Pvt aliases and
+    // state spelling variants), so the page is shown as returned - re-filtering it here dropped
+    // valid rows and broke the page counts.
+    const filtered = institutes;
 
     // Global search / Career Bee: show the picked institute first. Its lock still follows the
     // full directory's free items, so pinning it to the top never unlocks it.
@@ -425,6 +407,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
     useEffect(() => {
         if (categoryFilter !== 'All' && !categoryOptions.some((option) => String(option.value) === String(categoryFilter))) {
             setCategoryFilter('All');
+            setPage(1);
         }
     }, [categoryFilter, categoryOptions]);
 
@@ -479,7 +462,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                     </View>
                     <ScrollView className="max-h-[220px]" keyboardShouldPersistTaps="handled">
                         {categoryFilter !== 'All' ? (
-                            <Pressable onPress={() => { clearSearchFocus(); setCategoryFilter('All'); setCategorySearchQuery(''); setShowCategoryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                            <Pressable onPress={() => { clearSearchFocus(); setCategoryFilter('All'); setPage(1); setCategorySearchQuery(''); setShowCategoryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
                                 <Text className="text-[13px] font-bold text-brand">All Domains</Text>
                             </Pressable>
                         ) : null}
@@ -489,7 +472,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                             searchableCategoryOptions.map((opt) => {
                                 const value = getOptionValue(opt);
                                 return (
-                                    <Pressable key={value} onPress={() => { clearSearchFocus(); setCategoryFilter(value); setCategorySearchQuery(''); setShowCategoryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                                    <Pressable key={value} onPress={() => { clearSearchFocus(); setCategoryFilter(value); setPage(1); setCategorySearchQuery(''); setShowCategoryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
                                         <Text numberOfLines={1} className={`text-[13px] font-semibold ${value === String(categoryFilter) ? 'text-brand' : preferences.darkMode ? 'text-white' : 'text-ink'}`}>{getOptionLabel(opt)}</Text>
                                     </Pressable>
                                 );
@@ -524,7 +507,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                     </View>
                     <ScrollView className="max-h-[220px]" keyboardShouldPersistTaps="handled">
                         {countryFilter !== 'All' ? (
-                            <Pressable onPress={() => { clearSearchFocus(); setCountryFilter('All'); setCountrySearchQuery(''); setShowCountryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                            <Pressable onPress={() => { clearSearchFocus(); selectCountry('All'); setCountrySearchQuery(''); setShowCountryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
                                 <Text className="text-[13px] font-bold text-brand">All Countries</Text>
                             </Pressable>
                         ) : null}
@@ -532,7 +515,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                             <Text className={`px-4 py-4 text-center text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No results found</Text>
                         ) : (
                             searchableCountryOptions.map((opt) => (
-                                <Pressable key={opt} onPress={() => { clearSearchFocus(); setCountryFilter(opt); setCountrySearchQuery(''); setShowCountryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                                <Pressable key={opt} onPress={() => { clearSearchFocus(); selectCountry(opt); setCountrySearchQuery(''); setShowCountryDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
                                     <Text numberOfLines={1} className={`text-[13px] font-semibold ${opt === countryFilter ? 'text-brand' : preferences.darkMode ? 'text-white' : 'text-ink'}`}>{opt}</Text>
                                 </Pressable>
                             ))
@@ -567,7 +550,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                     </View>
                     <ScrollView className="max-h-[220px]" keyboardShouldPersistTaps="handled">
                         {stateFilter !== 'All' ? (
-                            <Pressable onPress={() => { clearSearchFocus(); setStateFilter('All'); setStateSearchQuery(''); setShowStateDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                            <Pressable onPress={() => { clearSearchFocus(); setStateFilter('All'); setPage(1); setStateSearchQuery(''); setShowStateDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
                                 <Text className="text-[13px] font-bold text-brand">All States</Text>
                             </Pressable>
                         ) : null}
@@ -575,7 +558,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                             <Text className={`px-4 py-4 text-center text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No results found</Text>
                         ) : (
                             searchableStateOptions.map((opt) => (
-                                <Pressable key={opt} onPress={() => { clearSearchFocus(); setStateFilter(opt); setStateSearchQuery(''); setShowStateDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                                <Pressable key={opt} onPress={() => { clearSearchFocus(); setStateFilter(opt); setPage(1); setStateSearchQuery(''); setShowStateDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
                                     <Text numberOfLines={1} className={`text-[13px] font-semibold ${opt === stateFilter ? 'text-brand' : preferences.darkMode ? 'text-white' : 'text-ink'}`}>{opt}</Text>
                                 </Pressable>
                             ))
@@ -612,7 +595,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                     </View>
                     <ScrollView className="max-h-[220px]" keyboardShouldPersistTaps="handled">
                         {typeFilter !== 'All' ? (
-                            <Pressable onPress={() => { clearSearchFocus(); setTypeFilter('All'); setTypeSearchQuery(''); setShowTypeDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                            <Pressable onPress={() => { clearSearchFocus(); setTypeFilter('All'); setPage(1); setTypeSearchQuery(''); setShowTypeDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
                                 <Text className="text-[13px] font-bold text-brand">All Types</Text>
                             </Pressable>
                         ) : null}
@@ -620,7 +603,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                             <Text className={`px-4 py-4 text-center text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No results found</Text>
                         ) : (
                             searchableTypeOptions.map((opt) => (
-                                <Pressable key={opt} onPress={() => { clearSearchFocus(); setTypeFilter(opt); setTypeSearchQuery(''); setShowTypeDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
+                                <Pressable key={opt} onPress={() => { clearSearchFocus(); setTypeFilter(opt); setPage(1); setTypeSearchQuery(''); setShowTypeDropdown(false); }} className={`border-b px-4 py-3 ${preferences.darkMode ? 'border-[#1a1a1a]' : 'border-line'}`}>
                                     <Text numberOfLines={1} className={`text-[13px] font-semibold ${opt === typeFilter ? 'text-brand' : preferences.darkMode ? 'text-white' : 'text-ink'}`}>{getInstituteTypeLabel(opt)}</Text>
                                 </Pressable>
                             ))
@@ -638,6 +621,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                     setStateFilter('All');
                     setCountryFilter('All');
                     setCategoryFilter('All');
+                    setPage(1);
                     setTypeSearchQuery('');
                     setStateSearchQuery('');
                     setCountrySearchQuery('');
@@ -657,6 +641,17 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
 
             <View className="gap-3">
                 {!moduleAccessResolved ? <Text className={`text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Checking access...</Text> : null}
+                {moduleAccessResolved && accessCheckFailed ? (
+                    <View className={`flex-row items-center justify-between gap-3 rounded-[14px] border px-3 py-3 ${preferences.darkMode ? 'border-red-900 bg-[#241414]' : 'border-red-200 bg-red-50'}`}>
+                        <View className="flex-1">
+                            <Text className="text-[13px] font-bold text-red-600">{VERIFY_FAILED_HEADING}</Text>
+                            <Text className={`mt-0.5 text-[12px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{VERIFY_FAILED_MESSAGE}</Text>
+                        </View>
+                        <Pressable onPress={() => { setModuleAccessResolved(false); setAccessRetryToken((value) => value + 1); }} className="rounded-full bg-brand px-3 py-2">
+                            <Text className="text-[12px] font-bold text-white">Retry</Text>
+                        </Pressable>
+                    </View>
+                ) : null}
                 {isLoading ? <Text className={`text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Loading institutes...</Text> : null}
                 {!isLoading && loadError ? <Text className="text-[13px] text-brand">{loadError}</Text> : null}
                 {!isLoading && !loadError && displayedInstitutes.length === 0 ? (
@@ -677,7 +672,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                 return;
             }
             if (item.website && item.website !== '#') {
-                Linking.openURL(item.website);
+                openExternalUrl(item.website);
             }
         }}
     >
@@ -718,7 +713,7 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                             return;
                         }
                         if (item.website && item.website !== '#') {
-                            Linking.openURL(item.website);
+                            openExternalUrl(item.website);
                         }
                     }}
                     className="px-3 py-1.5"
@@ -754,7 +749,10 @@ const animationKey = `institute-list-${typeFilter}-${stateFilter}-${showFilters 
                     </Pressable>
                 </View>
             ) : null}
-            {showUnlockSheet ? (<UnlockBottomSheet title="Unlock Institutes" subtitle="Subscribe to more institute cards and links." onClose={() => setShowUnlockSheet(false)} onPress={() => setShowUnlockSheet(false)}/>) : null}
+            {showUnlockSheet ? (<UnlockBottomSheet title="Unlock Institutes" subtitle="Subscribe to more institute cards and links." onClose={() => setShowUnlockSheet(false)} onPress={() => {
+                setShowUnlockSheet(false);
+                openSubscriptionPrompt({ pathname: '/(drawer)/institute', params: params.moduleId ? { moduleId: String(params.moduleId) } : undefined });
+            }}/>) : null}
         </Screen>
     );
 }

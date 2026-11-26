@@ -74,10 +74,23 @@ function parseSkillList(value) {
     .filter(Boolean);
 }
 
-function formatAvailabilityDate(value) {
-  const parsedDate = new Date(value);
+const WEEKDAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-  if (Number.isNaN(parsedDate.getTime())) {
+// The backend identifies an availability day by the stored date's 'YYYY-MM-DD' part
+// (toISOString().slice(0, 10) in create-order) and reads the slot times on that day as IST.
+// The key AND the chip label (weekday / day / month) are both built from that one calendar date,
+// so they can never differ and nothing depends on the phone's timezone.
+function formatAvailabilityDate(value) {
+  const isoPrefix = typeof value === 'string' ? value.match(/^(\d{4}-\d{2}-\d{2})/) : null;
+  const parsedDate = new Date(value);
+  const key = isoPrefix
+    ? isoPrefix[1]
+    : Number.isNaN(parsedDate.getTime()) ? '' : parsedDate.toISOString().slice(0, 10);
+  const [year, month, day] = key ? key.split('-').map(Number) : [];
+  const calendarDate = key ? new Date(Date.UTC(year, month - 1, day)) : null;
+
+  if (!calendarDate || Number.isNaN(calendarDate.getTime())) {
     return {
       key: String(value || ''),
       day: 'Day',
@@ -87,10 +100,11 @@ function formatAvailabilityDate(value) {
   }
 
   return {
-    key: parsedDate.toISOString().split('T')[0],
-    day: parsedDate.toLocaleDateString('en-IN', { weekday: 'short' }),
-    date: String(parsedDate.getDate()),
-    month: parsedDate.toLocaleDateString('en-IN', { month: 'short' }),
+    key,
+    day: WEEKDAY_SHORT[calendarDate.getUTCDay()],
+    date: String(day),
+    month: MONTH_SHORT[month - 1],
+    year: String(year),
   };
 }
 
@@ -111,6 +125,7 @@ function normalizeAvailability(availability) {
         day: dateInfo.day,
         date: dateInfo.date,
         month: dateInfo.month,
+        year: dateInfo.year || '',
         slots: timeSlots,
         rawDate: item?.date || null,
       };
@@ -165,7 +180,6 @@ export function mapMentorItem(item, index = 0) {
     phoneNumber: item?.phone_number || item?.phoneNumber || '',
     dob: item?.dateof_birth || item?.dateOfBirth || '',
     education: item?.education || '',
-    placeOfWork: item?.placeof_word || item?.placeOfWork || '',
     linkedin: item?.linkedin || '',
     facebook: item?.facebook || '',
     status: Boolean(item?.status),

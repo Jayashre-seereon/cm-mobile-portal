@@ -73,6 +73,15 @@ function mapInstituteItem(item, index) {
   };
 }
 
+// The screens offer India / Other as country choices. The backend has no country called
+// "Other": it is "everything outside India" (excludeCountry=india), same as the user portal.
+function appendCountryParam(params, country) {
+  const value = String(country || '').trim().toLowerCase();
+  if (!value || value === 'all') return;
+  if (value === 'other') params.append('excludeCountry', 'india');
+  else params.append('country', value);
+}
+
 export async function getInstitutes({
   page = 1,
   limit = 30,
@@ -84,7 +93,7 @@ export async function getInstitutes({
   const params = new URLSearchParams({ page: String(page), limit: String(limit) });
 
   if (category && category !== 'All') params.append('category', category);
-  if (country && country !== 'All') params.append('country', country);
+  appendCountryParam(params, country);
   if (state && state !== 'All') params.append('state', state);
   if (type && type !== 'All') params.append('type', type);
 
@@ -104,6 +113,7 @@ export async function getCareerLibraryInstitutions({
   secondcategoryId = '',
   subcategoryId = '',
   region = '',
+  country = '',
   state = '',
   type = '',
 } = {}) {
@@ -112,6 +122,7 @@ export async function getCareerLibraryInstitutions({
   if (secondcategoryId) params.append('secondcategoryId', String(secondcategoryId));
   if (subcategoryId) params.append('subcategoryId', String(subcategoryId));
   if (region) params.append('region', region);
+  appendCountryParam(params, country);
   if (state) params.append('state', state);
   if (type) params.append('type', type);
 
@@ -161,10 +172,22 @@ export async function getCategories() {
 // Filter options for the institute screen. Every list only contains values that still have
 // institutes once the OTHER selected filters are applied, so the filters work in any order
 // (category -> state -> type, type -> state -> category, ...). Same endpoint as the user portal.
-export async function getInstituteFilters({ category = '', country = '', state = '', type = '' } = {}) {
+export async function getInstituteFilters({
+  category = '',
+  country = '',
+  state = '',
+  type = '',
+  categoryId = '',
+  secondcategoryId = '',
+  subcategoryId = '',
+} = {}) {
   const params = new URLSearchParams();
   const clean = (value) => (value && String(value).toLowerCase() !== 'all' ? String(value) : '');
 
+  // Career Archive scope (category / second category / specialization ids).
+  if (clean(categoryId)) params.append('categoryId', clean(categoryId));
+  if (clean(secondcategoryId)) params.append('secondcategoryId', clean(secondcategoryId));
+  if (clean(subcategoryId)) params.append('subcategoryId', clean(subcategoryId));
   if (clean(category)) params.append('category', clean(category));
   if (clean(state)) params.append('state', clean(state));
   if (clean(type)) params.append('type', clean(type));

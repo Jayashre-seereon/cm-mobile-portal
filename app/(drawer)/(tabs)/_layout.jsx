@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Tabs } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { Tabs, router } from 'expo-router';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppState } from '../../../src/app-state';
 import { UnlockBottomSheet } from '../../../src/careermap-ui';
@@ -8,8 +9,19 @@ import { checkModuleAccess, getModules } from '../../../src/api/moduleAccessApi'
 import { openSubscriptionPrompt } from '../../../src/subscription-flow';
 import { palette } from '../../../src/careermap-data';
 import { AppHeader } from '../../../src/app-header';
+import { useAuthStore } from '../../../src/store/auth-store';
+
+const TAB_ROUTES = {
+    library: '/(drawer)/(tabs)/library',
+    learn: '/(drawer)/(tabs)/learn',
+};
+
 export default function TabsLayout() {
-    const { preferences } = useAppState();
+    const { preferences, activeSubscriptionPlanIds } = useAppState();
+    const accessToken = useAuthStore((state) => state.accessToken);
+    const userId = useAuthStore((state) => String(state.user?.id ?? state.user?._id ?? ''));
+    const planKey = Array.isArray(activeSubscriptionPlanIds) ? activeSubscriptionPlanIds.map(String).sort().join(',') : '';
+    const requestIdRef = useRef(0);
     const insets = useSafeAreaInsets();
     const [lockedTab, setLockedTab] = useState(null);
     const [tabAccess, setTabAccess] = useState({
@@ -27,77 +39,84 @@ export default function TabsLayout() {
         },
     }), []);
 
-    useEffect(() => {
-        let isMounted = true;
+    // Re-checked whenever the session, the user or their plans change, whenever the tabs regain
+    // focus (e.g. back from payment-success) and when a locked tab is tapped, so a new plan
+    // unlocks the tabs without restarting the app. A failed check is retried on the next of these.
+    const loadTabAccess = useCallback(async () => {
+        const requestId = ++requestIdRef.current;
+        const nextState = {
+            library: { status: 'locked' },
+            learn: { status: 'locked' },
+        };
+        try {
+            const modules = await getModules();
 
-        async function loadTabAccess() {
-            try {
-                const modules = await getModules();
-                const nextState = {
-                    library: { status: 'locked' },
-                    learn: { status: 'locked' },
+            for (const [tabName, matcher] of Object.entries(moduleTitleMatchers)) {
+                const matchedModule = modules.find((module) => String(module?.title || '').trim().toLowerCase().includes(matcher.match));
+                const moduleId = Number(matchedModule?.id);
+
+                if (!Number.isFinite(moduleId)) {
+                    continue;
+                }
+
+                const response = await checkModuleAccess(moduleId).catch(() => null);
+                const mode = String(response?.mode || '').toLowerCase();
+                nextState[tabName] = {
+                    status: response?.allowed === false ? 'locked' : (mode || 'locked'),
+                    moduleId,
+                    title: matcher.title,
                 };
-
-                for (const [tabName, matcher] of Object.entries(moduleTitleMatchers)) {
-                    const matchedModule = modules.find((module) => String(module?.title || '').trim().toLowerCase().includes(matcher.match));
-                    const moduleId = Number(matchedModule?.id);
-
-                    if (!Number.isFinite(moduleId)) {
-                        continue;
-                    }
-
-                    const response = await checkModuleAccess(moduleId).catch(() => null);
-                    const mode = String(response?.mode || '').toLowerCase();
-                    nextState[tabName] = {
-                        status: mode || (response?.allowed === false ? 'locked' : 'locked'),
-                        moduleId,
-                        title: matcher.title,
-                    };
-                }
-
-                if (isMounted) {
-                    setTabAccess(nextState);
-                }
-            }
-            catch {
-                if (isMounted) {
-                    setTabAccess({
-                        library: { status: 'locked' },
-                        learn: { status: 'locked' },
-                    });
-                }
             }
         }
-
-        void loadTabAccess();
-        return () => {
-            isMounted = false;
-        };
+        catch {
+            // keep everything locked; the next focus / tab press tries again
+        }
+        if (requestId === requestIdRef.current) {
+            setTabAccess(nextState);
+        }
+        return nextState;
     }, [moduleTitleMatchers]);
 
-    const isTabUnlocked = (tabName) => {
-        const status = tabAccess[tabName]?.status;
-        return status === 'full' || status === 'preview';
-    };
+    useEffect(() => {
+        void loadTabAccess();
+    }, [loadTabAccess, accessToken, userId, planKey]);
 
-    const handleBlockedTabPress = (tabName, event) => {
+    useFocusEffect(useCallback(() => {
+        void loadTabAccess();
+    }, [loadTabAccess]));
+
+    useEffect(() => () => {
+        // Ignore answers that arrive after the layout unmounts.
+        requestIdRef.current += 1;
+    }, []);
+
+    const isStatusUnlocked = (status) => status === 'full' || status === 'unlocked' || status === 'preview';
+    const isTabUnlocked = (tabName) => isStatusUnlocked(tabAccess[tabName]?.status);
+
+    const handleBlockedTabPress = async (tabName, event) => {
         if (isTabUnlocked(tabName)) {
             return;
         }
 
         event.preventDefault();
-        const config = tabAccess[tabName];
+        // The stored state may be stale (plan just bought, earlier check failed): ask again.
+        const latest = await loadTabAccess();
+        if (isStatusUnlocked(latest[tabName]?.status)) {
+            router.navigate(TAB_ROUTES[tabName]);
+            return;
+        }
+        const config = latest[tabName];
         setLockedTab({
             title: config?.title || 'Locked',
             subtitle: tabName === 'library'
                 ? 'Unlock the career archive to browse streams, roles, and college paths.'
                 : 'Unlock career & personality videos before opening this tab.',
-            route: tabName === 'library'
-                ? '/(drawer)/(tabs)/library'
-                : '/(drawer)/(tabs)/learn',
+            route: TAB_ROUTES[tabName],
         });
     };
 
+    // A tabBarIcon render function, not a component.
+    // eslint-disable-next-line react/display-name
     const lockedTabIcon = (tabName, unlockedIcon, lockedIcon = 'lock-closed') => ({ color, size }) => (
         <Ionicons name={isTabUnlocked(tabName) ? unlockedIcon : lockedIcon} size={size} color={color} />
     );
@@ -128,13 +147,13 @@ export default function TabsLayout() {
             title: 'Career Archive',
             tabBarIcon: lockedTabIcon('library', 'book', 'lock-closed'),
         }} listeners={{
-            tabPress: (event) => handleBlockedTabPress('library', event),
+            tabPress: (event) => { void handleBlockedTabPress('library', event); },
         }}/>
       <Tabs.Screen name="learn" options={{
             title: 'Learn',
             tabBarIcon: lockedTabIcon('learn', 'school', 'lock-closed'),
         }} listeners={{
-            tabPress: (event) => handleBlockedTabPress('learn', event),
+            tabPress: (event) => { void handleBlockedTabPress('learn', event); },
         }}/>
       <Tabs.Screen name="assessment" options={{
             href: null,

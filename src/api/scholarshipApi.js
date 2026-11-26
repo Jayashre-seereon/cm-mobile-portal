@@ -1,5 +1,5 @@
 import api from './axios';
-import { getDeadlineStatus, isComingSoonDeadline } from '../utils/deadlineStatus';
+import { NO_DEADLINE_STATUS, formatIstDate, getDeadlineStatus, isComingSoonDeadline } from '../utils/deadlineStatus';
 
 function stripHtml(value) {
   if (!value) {
@@ -14,17 +14,15 @@ function formatDeadline(deadline) {
     return 'Deadline not available';
   }
 
-  const parsedDate = new Date(deadline);
+  // IST calendar date, the same date the Active / Expired status is computed from.
+  return formatIstDate(deadline) || String(deadline);
+}
 
-  if (Number.isNaN(parsedDate.getTime())) {
-    return deadline;
-  }
-
-  return parsedDate.toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+// Same as the user portal: a scholarship without a readable deadline is not open, so it is
+// shown as Inactive and sorted after the active ones.
+function getScholarshipStatus(deadline) {
+  const status = getDeadlineStatus(deadline);
+  return status === NO_DEADLINE_STATUS ? 'Expired' : status;
 }
 
 function formatAmount(price) {
@@ -86,9 +84,9 @@ function mapScholarshipItem(item, index) {
    eligibility: formatEligibility(item?.eligibility),
     amount: formatAmount(item?.price),
     deadline: formatDeadline(item?.deadline),
-    comingSoon: getDeadlineStatus(item?.deadline) === 'Active' && isComingSoonDeadline(item?.deadline),
+    comingSoon: getScholarshipStatus(item?.deadline) === 'Active' && isComingSoonDeadline(item?.deadline),
     tag: scholarshipType,
-    status: getDeadlineStatus(item?.deadline),
+    status: getScholarshipStatus(item?.deadline),
     provider: scholarshipType,
    description: stripHtml(item?.description) || 'Scholarship details are not available right now.',
     descriptionHtml: item?.description || '',

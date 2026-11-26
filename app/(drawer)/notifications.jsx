@@ -55,7 +55,7 @@ export default function NotificationsScreen() {
         <Text className="text-[13px] text-brand">{loadError}</Text>
       ) : null}
 
-      {!isLoading && notifications.length === 0 ? (
+      {!isLoading && !loadError && notifications.length === 0 ? (
         <View className={`gap-2 rounded-[22px] border p-[18px] ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`}>
           <Text className={`text-[15px] font-extrabold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>No notifications yet</Text>
           <Text className={`text-[13px] leading-[21px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>When the backend sends updates, they will appear here automatically.</Text>

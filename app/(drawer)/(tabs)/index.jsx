@@ -7,11 +7,21 @@ import api from '../../../src/api/axios';
 import { createMentorReview } from '../../../src/api/mentorApi';
 import { checkModuleAccess, getModules } from '../../../src/api/moduleAccessApi';
 import { useAppState } from '../../../src/app-state';
-import { getDeadlineStatus, isComingSoonDeadline } from '../../../src/utils/deadlineStatus';
+import { formatIstDate, getDeadlineStatus, isComingSoonDeadline } from '../../../src/utils/deadlineStatus';
 import { featuredInstitutes, featuredScholarships, moduleCards, palette } from '../../../src/careermap-data';
 import { AnimatedPressable, Pill, Screen, SectionHeader, UnlockBottomSheet } from '../../../src/careermap-ui';
 import { useAuthStore } from '../../../src/store/auth-store';
 import { openSubscriptionPrompt } from '../../../src/subscription-flow';
+import { VERIFY_FAILED_HEADING, VERIFY_FAILED_MESSAGE } from '../../../src/utils/searchNavigation';
+// Home section -> the param its module screen reads to open / pin one item (useSearchDeepLink).
+const SECTION_ITEM_PARAM = {
+  scholarships: 'scholarshipId',
+  entranceExam: 'examId',
+  institutes: 'instituteId',
+  mentors: 'mentorId',
+};
+// The server says "full" (some screens say "unlocked"); both mean the module is open.
+const isOpenSectionStatus = (status) => ['full', 'unlocked', 'preview'].includes(String(status || '').toLowerCase());
 const parseReviewDateValue = (value) => {
   if (!value) {
     return null;
@@ -150,6 +160,7 @@ export default function HomeScreen() {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState(Array(personalityQuestions.length).fill(null));
   const [dashboardData, setDashboardData] = useState(null);
+  const [dashboardError, setDashboardError] = useState(false);
   const [lockedModule, setLockedModule] = useState(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [reviewSubmitting, setReviewSubmitting] = useState(false);
@@ -178,14 +189,6 @@ export default function HomeScreen() {
     const availableWidth = width - 40 - (numColumns - 1) * cardGap;
     return Math.floor(availableWidth / numColumns);
   }, [width, isLargeScreen]);
-  const featureByTitle = {
-    'Career Archive': 'career-archive',
-    'Career & Personality Videos': 'master-class',
-    'Book Your Mentor': 'book-mentor',
-    'Scholarships': 'scholarship',
-    'Study Abroad': 'abroad-consultancy',
-    'Career Insights': 'career-news-letter',
-  };
   const moduleOrder = [
     'Career Archive',
     'Entrance Exam',
@@ -308,12 +311,18 @@ export default function HomeScreen() {
   const loadDashboard = async (isMountedRef) => {
     try {
       const response = await api.get('/user/dashboard');
-      if ((!isMountedRef || isMountedRef.current) && response?.data?.success) {
-        setDashboardData(response.data.data);
+      if (!isMountedRef || isMountedRef.current) {
+        if (response?.data?.success) {
+          setDashboardData(response.data.data);
+          setDashboardError(false);
+        } else {
+          setDashboardError(true);
+        }
       }
     }
     catch (error) {
       console.log('Dashboard fetch failed', error?.response?.data || error?.message || error);
+      if (!isMountedRef || isMountedRef.current) setDashboardError(true);
     }
   };
   useEffect(() => {
@@ -333,11 +342,13 @@ export default function HomeScreen() {
   }, [dashboardData?.user?.firstName, dashboardData?.user?.lastName, onboarding.name, userProfile.name]);
   const dashboardModules = useMemo(() => {
     if (!dashboardData?.modules?.length) {
+      // Dashboard not loaded yet (or failed): neutral cards with no lock state. Opening one
+      // asks the server first (handleModulePress) - nothing is shown as unlocked by default.
       return moduleCards.map((card) => ({
         ...card,
         id: card.title,
         lockTitle: card.title,
-        accessStatus: 'unlocked',
+        accessStatus: 'unknown',
       }));
     }
     const moduleCardMap = new Map(moduleCards.map((card) => [resolveModuleLookupKey(card.title), card]));
@@ -415,11 +426,7 @@ export default function HomeScreen() {
       id: item.id,
       name: item.name || '',
       amount: item.price ? `Rs ${item.price} / year` : '',
-      deadline: item.deadline ? new Date(item.deadline).toLocaleDateString('en-IN', {
-        day: '2-digit',
-        month: 'short',
-        year: 'numeric',
-      }) : '',
+      deadline: item.deadline ? formatIstDate(item.deadline) || String(item.deadline) : '',
       comingSoon: getDeadlineStatus(item.deadline) === 'Active' && isComingSoonDeadline(item.deadline),
       tag: item.type || '',
     }));
@@ -537,19 +544,42 @@ export default function HomeScreen() {
     const isAssessmentModule = isCareerPsychometricAssessmentModule(card);
 
     if (!Number.isFinite(moduleId)) {
-      const fallbackFeature = featureByTitle[card?.lockTitle || card?.title || ''];
-
-      if (fallbackFeature && !isUnlocked(fallbackFeature)) {
-        setLockedModule({
-          title: card.title,
-          route: card.route,
-          moduleId: null,
-          message: 'Please purchase a subscription to continue accessing this module.',
+      // Card from before the dashboard loaded: find the real module and ask the server.
+      // If that fails, the module stays closed ("Unable to verify access").
+      const verifyFailed = () => Alert.alert(VERIFY_FAILED_HEADING, VERIFY_FAILED_MESSAGE);
+      try {
+        const lookupKey = resolveModuleLookupKey(card?.lockTitle || card?.title || '');
+        const modules = await getModules();
+        const matched = modules.find((module) => resolveModuleLookupKey(module?.title) === lookupKey);
+        const resolvedId = Number(matched?.id);
+        if (!Number.isFinite(resolvedId)) {
+          verifyFailed();
+          return;
+        }
+        if (isAssessmentModule) {
+          router.push({ pathname: card.route, params: { moduleId: String(resolvedId) } });
+          return;
+        }
+        const response = await checkModuleAccess(resolvedId);
+        if (!response?.allowed) {
+          setLockedModule({
+            title: card.title,
+            route: card.route,
+            moduleId: resolvedId,
+            message: response?.message || 'Please purchase a subscription to continue accessing this module.',
+          });
+          return;
+        }
+        router.push({
+          pathname: card.route,
+          params: {
+            moduleId: String(resolvedId),
+            accessStatus: String(response?.mode || '').toLowerCase() === 'preview' ? 'preview' : 'unlocked',
+          },
         });
-        return;
+      } catch {
+        verifyFailed();
       }
-
-      router.push(card.route);
       return;
     }
 
@@ -590,22 +620,26 @@ export default function HomeScreen() {
       });
     } catch (error) {
       console.log('Module access check failed', error?.response?.data || error?.message || error);
-      router.push(card.route);
+      // Fail closed: don't open the module when its access can't be checked.
+      Alert.alert(VERIFY_FAILED_HEADING, VERIFY_FAILED_MESSAGE);
     }
   };
-  const handleSectionPress = (sectionName) => {
+  // Tapping one card opens that item on its module screen (the screen still applies its own lock).
+  const handleSectionPress = (sectionName, item) => {
     const config = sectionAccess[sectionName];
-    const unlocked = config?.status === 'full' || config?.status === 'preview';
+    const unlocked = isOpenSectionStatus(config?.status);
 
     if (unlocked) {
-      router.push(config.moduleId
-        ? {
-          pathname: config.route,
-          params: {
-            moduleId: String(config.moduleId),
-          },
-        }
-        : config.route);
+      const itemParam = SECTION_ITEM_PARAM[sectionName];
+      const itemId = item?.id;
+      const hasItem = Boolean(itemParam) && itemId !== null && itemId !== undefined && itemId !== '';
+      router.push({
+        pathname: config.route,
+        params: {
+          ...(config.moduleId ? { moduleId: String(config.moduleId) } : {}),
+          ...(hasItem ? { [itemParam]: String(itemId), searchKey: String(Date.now()) } : {}),
+        },
+      });
       return;
     }
 
@@ -618,7 +652,7 @@ export default function HomeScreen() {
   };
   const handleSectionSeeAll = (sectionName) => {
     const config = sectionAccess[sectionName];
-    const unlocked = config?.status === 'full' || config?.status === 'preview';
+    const unlocked = isOpenSectionStatus(config?.status);
 
     if (unlocked) {
       router.push(config.moduleId
@@ -751,6 +785,14 @@ export default function HomeScreen() {
     </View>
 
     <SectionHeader title="Explore Modules" />
+    {dashboardError && !dashboardData ? (
+      <View className="mt-3 flex-row flex-wrap items-center gap-3">
+        <Text className={`text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Could not load your modules.</Text>
+        <AnimatedPressable onPress={() => loadDashboard()} className="rounded-[10px] border border-brand px-3 py-1">
+          <Text className="text-[12px] font-bold text-brand">Try again</Text>
+        </AnimatedPressable>
+      </View>
+    ) : null}
     <View className="flex-row flex-wrap mt-4 mb-2" style={{ gap: isLargeScreen ? 12 : 10 }}>
       {dashboardModules.map((card) => {
         const statusIcon = card.accessStatus === 'locked'
@@ -806,7 +848,7 @@ export default function HomeScreen() {
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-3 pr-2">
         {dashboardMentors.map((mentor) => {
           const mentorUnlocked = sectionAccess.mentors.status === 'full' || sectionAccess.mentors.status === 'preview';
-          return (<AnimatedPressable key={mentor.id || mentor.name} className={`relative min-h-[168px] w-[164px] items-center gap-1.5 rounded-[22px] border p-4 mb-4 mt-4 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`} onPress={() => handleSectionPress('mentors')}>
+          return (<AnimatedPressable key={mentor.id || mentor.name} className={`relative min-h-[168px] w-[164px] items-center gap-1.5 rounded-[22px] border p-4 mb-4 mt-4 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`} onPress={() => handleSectionPress('mentors', mentor)}>
           <View className="h-[52px] w-[52px] overflow-hidden rounded-[18px] " style={{ backgroundColor: `${mentor.accent}15` }}>
             {renderMentorAvatar(mentor)}
           </View>
@@ -834,7 +876,7 @@ export default function HomeScreen() {
     <View className="gap-3 mb-4 mt-4">
       {dashboardScholarships.map((item) => {
         const scholarshipUnlocked = sectionAccess.scholarships.status === 'full' || sectionAccess.scholarships.status === 'preview';
-        return (<AnimatedPressable key={item.id || item.name} className={`relative flex-row items-center gap-3 rounded-[22px] border p-4 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`} onPress={() => handleSectionPress('scholarships')}>
+        return (<AnimatedPressable key={item.id || item.name} className={`relative flex-row items-center gap-3 rounded-[22px] border p-4 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`} onPress={() => handleSectionPress('scholarships', item)}>
         <View className={`h-[42px] w-[42px] items-center justify-center rounded-[14px] ${preferences.darkMode ? 'bg-[#163126]' : 'bg-[#edf9f1]'}`}>
           <Ionicons name="ribbon-outline" size={20} color={palette.green} />
         </View>
@@ -857,7 +899,7 @@ export default function HomeScreen() {
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-3 pr-2">
         {dashboardEntranceExams.map((exam) => {
           const entranceExamUnlocked = sectionAccess.entranceExam.status === 'full' || sectionAccess.entranceExam.status === 'preview';
-          return (<AnimatedPressable key={exam.id || exam.name} className={`relative min-h-[168px] w-[164px] items-center gap-2 rounded-[22px] border p-4 mb-4 mt-4 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`} onPress={() => handleSectionPress('entranceExam')}>
+          return (<AnimatedPressable key={exam.id || exam.name} className={`relative min-h-[168px] w-[164px] items-center gap-2 rounded-[22px] border p-4 mb-4 mt-4 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`} onPress={() => handleSectionPress('entranceExam', exam)}>
           <View className="h-[52px] w-[52px] overflow-hidden rounded-[18px]" style={{ backgroundColor: `${exam.accent}15` }}>
             {exam.image ? (
               <Image source={{ uri: exam.image }} resizeMode="cover" style={{ width: 52, height: 52, borderRadius: 18 }} />
@@ -885,7 +927,7 @@ export default function HomeScreen() {
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-3 pr-2">
       {dashboardInstitutes.map((item) => {
         const instituteUnlocked = sectionAccess.institutes.status === 'full' || sectionAccess.institutes.status === 'preview';
-        return (<AnimatedPressable key={item.id || item.name} className={`relative h-[196px] w-[164px] items-center gap-1.5 rounded-[22px] border p-4 mb-4 mt-4 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`} onPress={() => handleSectionPress('institutes')}>
+        return (<AnimatedPressable key={item.id || item.name} className={`relative h-[196px] w-[164px] items-center gap-1.5 rounded-[22px] border p-4 mb-4 mt-4 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`} onPress={() => handleSectionPress('institutes', item)}>
         <View className="h-[52px] w-[52px] overflow-hidden rounded-[18px]" style={{ backgroundColor: `${palette.blue}14` }}>
           {item.logo ? (<Image source={{ uri: item.logo }} resizeMode="cover" style={{ width: 52, height: 52, borderRadius: 18 }} />) : (<View className="h-[52px] w-[52px] items-center justify-center rounded-[18px]" style={{ backgroundColor: `${palette.blue}14`, borderWidth: 1, borderColor: `${palette.blue}18` }}>
             <Text className="text-[16px] font-black" style={{ color: palette.blue, lineHeight: 20 }}>

@@ -1,5 +1,7 @@
 import api, { API_BASE_URL } from './axios';
 import { Platform } from 'react-native';
+import { useAuthStore } from '../store/auth-store';
+import { removePushTokenFromBackend } from '../utils/pushNotifications';
 
 function getBrowserName() {
   if (Platform.OS !== 'web') {
@@ -200,19 +202,34 @@ export async function createHelpCenterRequest(payload = {}) {
   return response.data;
 }
 
-export async function logoutUser(accessToken = '') {
+// The refresh token is sent in the body (the app keeps it itself, there is no cookie), so the server
+// revokes it. Short timeout: logging out must never feel stuck on a slow or sleeping server.
+export async function logoutUser(accessToken = '', refreshToken = useAuthStore.getState().refreshToken) {
   const response = await api.post(
     '/auth/logout',
-    {},
-    accessToken
-      ? {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      : undefined
+    refreshToken ? { refreshToken } : {},
+    {
+      timeout: 8000,
+      ...(accessToken ? { headers: { Authorization: `Bearer ${accessToken}` } } : {}),
+    }
   );
   return response.data;
+}
+
+const LOGOUT_SERVER_WAIT_MS = 8000;
+
+// Server side of a user-initiated logout: removes this phone's push token and revokes the refresh token,
+// in parallel, waiting at most a few seconds. Never throws; the caller then clears the local session.
+export async function signOutOnServer() {
+  const { accessToken, refreshToken } = useAuthStore.getState();
+  let timer = null;
+  await Promise.race([
+    Promise.allSettled([removePushTokenFromBackend(), logoutUser(accessToken, refreshToken)]),
+    new Promise((resolve) => {
+      timer = setTimeout(resolve, LOGOUT_SERVER_WAIT_MS);
+    }),
+  ]);
+  if (timer) clearTimeout(timer);
 }
 
 export function getApiErrorMessage(error, fallbackMessage = 'Something went wrong') {

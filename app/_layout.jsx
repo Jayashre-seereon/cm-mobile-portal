@@ -27,11 +27,13 @@ function UpdateAutoApply() {
       }));
     }, []);
 
+    // A downloaded update is NOT applied with reloadAsync() while the app is running: a reload in the
+    // middle of a Razorpay checkout (or between checkout and payment verification, or while the user is
+    // in a UPI app) would drop the pending verify call, and it would also wipe in-progress assessments
+    // and forms. expo-updates launches the downloaded bundle automatically on the next cold start.
     useEffect(() => {
       if (!Updates.isEnabled || __DEV__ || !isUpdatePending) return;
-      Updates.reloadAsync().catch((error) => {
-        console.warn('[EAS OTA] Could not apply downloaded update:', error);
-      });
+      console.info('[EAS OTA] Update downloaded; it will be applied on the next app start.');
     }, [isUpdatePending]);
 
     return null;

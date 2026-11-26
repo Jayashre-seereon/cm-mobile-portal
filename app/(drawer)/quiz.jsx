@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { Alert, ActivityIndicator, Text, View } from 'react-native';
 import { useAppState } from '../../src/app-state';
@@ -43,6 +43,10 @@ export default function QuizScreen() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [listError, setListError] = useState('');
   const [quizError, setQuizError] = useState('');
+  // Set synchronously on the first Submit tap, so a quick second tap can't submit again.
+  const submittingRef = useRef(false);
+  // Id of the quiz whose full record (questions) has been loaded.
+  const [loadedQuizId, setLoadedQuizId] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -93,12 +97,18 @@ export default function QuizScreen() {
         const quiz = await getQuizById(selectedQuizId);
 
         if (isMounted) {
+          if (!quiz) {
+            // Keep the tapped list item so the error screen (with Back to Quizzes) shows;
+            // going back clears selectedQuizId, so the quiz can be tapped again.
+            setQuizError('This quiz is not available.');
+            return;
+          }
           setSelectedQuiz(quiz);
           setAnswers(Array.isArray(quiz?.questions) ? quiz.questions.map(() => null) : []);
+          setLoadedQuizId(selectedQuizId);
         }
       } catch (_error) {
         if (isMounted) {
-          setSelectedQuiz(null);
           setQuizError('Failed to load quiz questions.');
         }
       } finally {
@@ -138,6 +148,7 @@ export default function QuizScreen() {
     setQuizResult(null);
     setQuizError('');
     setIsSubmitting(false);
+    submittingRef.current = false;
   }
 
   function handleQuizBack() {
@@ -194,23 +205,38 @@ export default function QuizScreen() {
       return;
     }
 
+    if (submittingRef.current) {
+      return;
+    }
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    let response;
     try {
-      setIsSubmitting(true);
-      const response = await submitQuiz(payload);
+      response = await submitQuiz(payload);
       if (!response) {
         throw new Error('Could not record your quiz result. Please try again.');
       }
-      // The score is shown only when the server confirms Quiz access (resultAvailable).
-      // No score is ever calculated on the device.
-      const resultResponse = response.resultAvailable || !response.attemptId
-        ? response
-        : await getQuizAttemptResult(response.attemptId);
-      setQuizResult(resultResponse || response);
     } catch (error) {
       Alert.alert('Submission failed', error?.response?.data?.message || error?.message || 'Could not submit the quiz. Please try again.');
-    } finally {
+      submittingRef.current = false;
       setIsSubmitting(false);
+      return;
     }
+
+    // The attempt is recorded from here on: never report "Submission failed" (a retry would
+    // create a second attempt). The score is shown only when the server confirms Quiz access
+    // (resultAvailable); no score is ever calculated on the device.
+    let resultResponse = response;
+    if (!response.resultAvailable && response.attemptId) {
+      try {
+        resultResponse = (await getQuizAttemptResult(response.attemptId)) || response;
+      } catch {
+        resultResponse = response;
+      }
+    }
+    setQuizResult(resultResponse);
+    submittingRef.current = false;
+    setIsSubmitting(false);
   }
 
   const selectedQuestion = selectedQuiz?.questions?.[currentQuestion] || null;
@@ -300,7 +326,8 @@ export default function QuizScreen() {
   }
 
   if (selectedQuiz) {
-    if (isLoadingQuiz) {
+    // Until the quiz's questions have loaded, show the loading view (not the "no questions" one).
+    if (isLoadingQuiz || (!selectedQuestion && !quizError && loadedQuizId !== selectedQuizId)) {
       return (
       <Screen animationKey="quiz-loading">
           <View className="px-1 pb-8 pt-3">
@@ -339,7 +366,24 @@ export default function QuizScreen() {
     }
 
     if (!selectedQuestion) {
-      return null;
+      // A quiz with no questions: say so and offer the way back instead of a blank screen.
+      return (
+      <Screen animationKey="quiz-empty">
+          <View className="px-1 pb-8 pt-3">
+            <View className="mb-6">
+              <Text className="text-[12px] font-bold uppercase tracking-[1px] text-brand">Quiz</Text>
+              <Text className={`mt-1 text-[22px] font-extrabold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{selectedQuiz.title}</Text>
+            </View>
+
+            <View className={`items-center gap-3 rounded-[26px] border p-[22px] ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`}>
+              <Text className={`text-center text-[14px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>This quiz has no questions yet.</Text>
+              <AnimatedPressable className="mt-1 rounded-[16px] bg-brand px-5 py-3.5" onPress={handleQuizBack}>
+                <Text className="text-[14px] font-extrabold text-white">Back to Quizzes</Text>
+              </AnimatedPressable>
+            </View>
+          </View>
+        </Screen>
+      );
     }
 
     return (

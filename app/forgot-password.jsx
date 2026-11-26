@@ -106,7 +106,7 @@ export default function ForgotPasswordScreen() {
 
         <View className="mt-auto items-center gap-2 pb-2.5">
           <Text className={`text-center text-[12px] leading-[18px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>
-            Open the reset link from your email. If you tap the mobile link, the app will open the password reset screen directly.
+            Open the reset link from your email on this phone. It opens the password reset screen in the CareerMap app when the app is linked to that website, otherwise in your browser, where you can set a new password the same way.
           </Text>
 
           <AnimatedPressable onPress={() => router.push({ pathname: '/login', params: { userType: 'existing', mode: 'email' } })}>

@@ -176,6 +176,8 @@ export const ASSESSMENT_DOMAINS = [
 
 export const TOTAL_ASSESSMENT_QUESTIONS = 179;
 export const ESTIMATED_DURATION_MINS = "40-50";
+// Aptitude section timer (must match APTITUDE_TIME_LIMIT_SECONDS in assessment-attempt.jsx).
+export const APTITUDE_TIME_LIMIT_MINUTES = 30;
 
 /**
  * Robust helper to resolve Domain Metadata regardless of backend key casing/naming

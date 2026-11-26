@@ -310,6 +310,13 @@ export default function SplashRoute() {
                         router.replace(pendingInstituteOnboarding ? '/onboarding' : '/(drawer)/(tabs)');
                     })
                     .catch(() => {
+                        // A temporary failure (offline, server waking up) keeps the session: open the app and
+                        // let later requests refresh. Only a rejected session goes back to the login options.
+                        const { hasAuthenticatedSession, pendingInstituteOnboarding: pending } = useAuthStore.getState();
+                        if (hasAuthenticatedSession) {
+                            router.replace(pending ? '/onboarding' : '/(drawer)/(tabs)');
+                            return;
+                        }
                         router.replace('/auth-entry');
                     });
                 return;

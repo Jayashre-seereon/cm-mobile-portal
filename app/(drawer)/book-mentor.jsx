@@ -3,7 +3,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import RenderHTML from 'react-native-render-html';
 import { useWindowDimensions } from 'react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Image, Modal, Pressable, ScrollView, Text, TextInput, View, Linking } from 'react-native';
+import { ActivityIndicator, Animated, Image, Modal, Platform, Pressable, ScrollView, Text, TextInput, View, Linking } from 'react-native';
 import { createMentorOrder, getBookedMentorSlots, getMentors, verifyMentorPayment,getCategories} from '../../src/api/mentorApi';
 import { checkModuleAccess, getModules } from '../../src/api/moduleAccessApi';
 import { useAppState } from '../../src/app-state';
@@ -47,31 +47,30 @@ const renderMentorAvatar = (mentor, size = 52) => {
         </Text>
     </View>);
 };
-const normalizeSlotKey = (value = '') => String(value).toLowerCase().replace(/\s+/g, '').replace(/\./g, '').replace(/(am|pm)$/i, '');
 const normalizeModuleTitle = (value = '') => String(value).trim().toLowerCase().replace(/\s+/g, ' ');
+const padTwo = (value) => String(value).padStart(2, '0');
+// Mentor slots are Indian time (Asia/Kolkata, UTC+05:30), the same way the backend reads them
+// (utils/mentorBookingTime.js). Date keys are plain 'YYYY-MM-DD' calendar days, never shifted by the phone's timezone.
+const IST_OFFSET_MINUTES = 330;
+const parseDateKeyParts = (value) => {
+    const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) {
+        return null;
+    }
+
+    return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+};
 const formatDisplayDate = (value) => {
     if (!value) {
         return '';
     }
 
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) {
+    const parts = parseDateKeyParts(value);
+    if (!parts) {
         return String(value);
     }
 
-    return parsed.toLocaleDateString('en-GB');
-};
-const parseDateKey = (value) => {
-    if (!value) {
-        return null;
-    }
-
-    const parsed = new Date(String(value));
-    if (Number.isNaN(parsed.getTime())) {
-        return null;
-    }
-
-    return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate());
+    return `${padTwo(parts.day)}/${padTwo(parts.month)}/${parts.year}`;
 };
 const parseTimeToken = (token) => {
     const normalized = String(token || '').trim();
@@ -105,41 +104,77 @@ const parseTimeToken = (token) => {
 
     return { hours, minutes };
 };
-const getSlotEndDate = (dateKey, slot) => {
-    const baseDate = parseDateKey(dateKey);
-    if (!baseDate || !slot) {
+// Compares slots by their 24-hour times so '10:00 AM' and '10:00 PM' never match each other.
+const normalizeSlotKey = (value = '') => {
+    const tokens = String(value).replace(/\./g, '').split(/[-–—]/).map((token) => token.trim()).filter(Boolean);
+    const times = tokens.map((token) => parseTimeToken(token));
+    if (tokens.length && times.every(Boolean)) {
+        return times.map((time) => `${padTwo(time.hours)}:${padTwo(time.minutes)}`).join('-');
+    }
+
+    return String(value).toLowerCase().replace(/\s+/g, '').replace(/\./g, '');
+};
+// Start of a slot as an exact moment: the slot's first time on the date key, in IST
+// (same as the backend's getMentorBookingStartAt).
+const getSlotStartDate = (dateKey, slot) => {
+    const parts = parseDateKeyParts(dateKey);
+    if (!parts || !slot) {
         return null;
     }
 
-    const tokens = String(slot).split(/[-–—]/).map((value) => value.trim()).filter(Boolean);
-    const endToken = tokens[tokens.length - 1];
-    const time = parseTimeToken(endToken);
+    const startToken = String(slot).replace(/\./g, '').split(/[-–—]/)[0]?.trim();
+    const time = parseTimeToken(startToken);
     if (!time) {
         return null;
     }
 
-    const slotEnd = new Date(baseDate);
-    slotEnd.setHours(time.hours, time.minutes, 0, 0);
-    if (slotEnd < baseDate) {
-        slotEnd.setDate(slotEnd.getDate() + 1);
-    }
-
-    return slotEnd;
+    return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, time.hours, time.minutes) - IST_OFFSET_MINUTES * 60000);
 };
-const isSlotExpired = (slot, dateKey) => {
-    const slotEndDate = getSlotEndDate(dateKey, slot);
-    if (!slotEndDate) {
+// A slot can no longer be booked once it has STARTED (the backend refuses it from then on).
+const isSlotExpired = (slot, dateKey, nowMs = Date.now()) => {
+    const slotStartDate = getSlotStartDate(dateKey, slot);
+    if (!slotStartDate) {
         return false;
     }
 
-    return slotEndDate.getTime() <= Date.now();
+    return slotStartDate.getTime() <= nowMs;
 };
-const getFutureSlots = (dateKey, slotList) => {
+const getFutureSlots = (dateKey, slotList, nowMs = Date.now()) => {
     if (!Array.isArray(slotList)) {
         return [];
     }
 
-    return slotList.filter((slot) => !isSlotExpired(slot, dateKey));
+    return slotList.filter((slot) => !isSlotExpired(slot, dateKey, nowMs));
+};
+// react-native-razorpay rejects with { code, description } (description is often a JSON string);
+// the web shim rejects with Error('Payment was cancelled.').
+const getCheckoutErrorInfo = (error) => {
+    let details = null;
+    if (typeof error?.description === 'string') {
+        try {
+            details = JSON.parse(error.description)?.error || null;
+        } catch (_parseError) {
+            details = null;
+        }
+    }
+    else if (error?.error && typeof error.error === 'object') {
+        details = error.error;
+    }
+
+    const rawDescription = details?.description || (typeof error?.description === 'string' ? error.description : '') || error?.message || '';
+    const nativeCancelCode = typeof error?.code === 'number'
+        && ((Platform.OS === 'android' && error.code === 0) || (Platform.OS === 'ios' && error.code === 2));
+    const cancelled = nativeCancelCode
+        || error?.code === 'PAYMENT_CANCELLED'
+        || details?.reason === 'payment_cancelled'
+        || /cancel/i.test(rawDescription);
+
+    return {
+        cancelled,
+        message: rawDescription && !/^\s*\{/.test(rawDescription)
+            ? rawDescription
+            : 'Payment failed. Please try again or use a different payment method.',
+    };
 };
 export default function BookMentorScreen() {
     const params = useLocalSearchParams();
@@ -185,6 +220,14 @@ const [resolvedModuleId, setResolvedModuleId] = useState(() => {
     const [bookedSlotsLoading, setBookedSlotsLoading] = useState(false);
     const [bookedSlotsError, setBookedSlotsError] = useState('');
     const [mentorsLoaded, setMentorsLoaded] = useState(false);
+    const [moduleAccessError, setModuleAccessError] = useState('');
+    const [accessCheckAttempt, setAccessCheckAttempt] = useState(0);
+    const [isPaying, setIsPaying] = useState(false);
+    const payingRef = useRef(false);
+    // A captured payment whose booking confirmation failed for a temporary reason (network / server error).
+    const [pendingVerification, setPendingVerification] = useState(null);
+    // Current time, refreshed every minute so slots that have started drop out of the list.
+    const [nowMs, setNowMs] = useState(() => Date.now());
     const celebration = useRef(new Animated.Value(0)).current;
     const fallbackMentor = selectedMentorId ? mentorList.find((item) => String(item.id) === String(selectedMentorId)) || null : null;
     const activeMentor = selectedMentor || fallbackMentor;
@@ -240,50 +283,41 @@ const [resolvedModuleId, setResolvedModuleId] = useState(() => {
                 ? `mentor-${selectedMentorId || activeMentor.id || activeMentor.name}`
                 : 'mentor-list';
     const dates = useMemo(() => {
-        if (activeMentor?.availability?.length) {
-            return activeMentor.availability
-                .map((item) => ({
-                    key: item.key,
-                    day: item.day,
-                    date: item.date,
-                    month: item.month,
-                    year: item.year || (item.key ? new Date(`${item.key}T00:00:00`).getFullYear().toString() : ''),
-                    slots: Array.isArray(item.slots) ? item.slots : [],
-                    available: getFutureSlots(item.key, item.slots).length > 0,
-                }))
-                .filter((item) => item.available);
-        }
-
-        return Array.from({ length: 14 }, (_, index) => {
-            const current = new Date();
-            current.setDate(current.getDate() + index);
-            return {
-                key: current.toISOString().split('T')[0],
-                day: current.toLocaleDateString('en-IN', { weekday: 'short' }),
-                date: current.getDate().toString(),
-                month: current.toLocaleDateString('en-IN', { month: 'short' }),
-                year: current.getFullYear().toString(),
-                available: index % 4 !== 1,
-            };
-        });
-    }, [activeMentor]);
-    const slots = useMemo(() => {
+        // Only real availability is offered; a mentor without future slots shows "No slots available".
         if (!activeMentor?.availability?.length) {
-            return ['9:00 AM', '10:00 AM', '11:30 AM', '2:00 PM', '3:30 PM', '5:00 PM', '6:30 PM'];
+            return [];
         }
 
-        const availabilityForSelectedDate = activeMentor.availability.find((item) => item.key === selectedDate);
-        const futureSlotsForSelectedDate = availabilityForSelectedDate ? getFutureSlots(selectedDate, availabilityForSelectedDate.slots) : [];
+        return activeMentor.availability
+            .map((item) => ({
+                key: item.key,
+                day: item.day,
+                date: item.date,
+                month: item.month,
+                year: item.year || parseDateKeyParts(item.key)?.year?.toString() || '',
+                slots: Array.isArray(item.slots) ? item.slots : [],
+                available: getFutureSlots(item.key, item.slots, nowMs).length > 0,
+            }))
+            .filter((item) => item.available);
+    }, [activeMentor, nowMs]);
+    const slots = useMemo(() => {
+        if (!dates.length) {
+            return [];
+        }
+
+        const availabilityForSelectedDate = dates.find((item) => item.key === selectedDate);
+        const futureSlotsForSelectedDate = availabilityForSelectedDate ? getFutureSlots(selectedDate, availabilityForSelectedDate.slots, nowMs) : [];
         if (futureSlotsForSelectedDate.length) {
             return futureSlotsForSelectedDate;
         }
 
         const firstAvailableDate = dates[0];
-        return firstAvailableDate ? getFutureSlots(firstAvailableDate.key, firstAvailableDate.slots) : [];
-    }, [activeMentor, selectedDate, dates]);
+        return firstAvailableDate ? getFutureSlots(firstAvailableDate.key, firstAvailableDate.slots, nowMs) : [];
+    }, [selectedDate, dates, nowMs]);
     const bookedSlotKeys = useMemo(() => bookedSlots.map((slot) => normalizeSlotKey(slot)).filter(Boolean), [bookedSlots]);
     const isSlotBooked = (slot) => bookedSlotKeys.includes(normalizeSlotKey(slot));
     const openBookingPanel = () => {
+        setNowMs(Date.now());
         if (!selectedDate && dates.length) {
             const firstAvailableDate = dates.find((date) => date.available) || dates[0];
             setSelectedDate(firstAvailableDate?.key || '');
@@ -433,6 +467,16 @@ const filteredMentors = useMemo(() => {
             setSelectedSlot('');
         }
     }, [bookedSlotKeys, selectedSlot]);
+    useEffect(() => {
+        const timer = setInterval(() => setNowMs(Date.now()), 60000);
+        return () => clearInterval(timer);
+    }, []);
+    // A selected slot that has started meanwhile (or is no longer offered) is unselected.
+    useEffect(() => {
+        if (selectedSlot && !slots.includes(selectedSlot)) {
+            setSelectedSlot('');
+        }
+    }, [slots, selectedSlot]);
     // A mentor opened from a link / route param follows the same lock as the list: a locked
     // mentor shows the unlock sheet instead of the profile.
     const handledMentorParamRef = useRef('');
@@ -441,13 +485,10 @@ const filteredMentors = useMemo(() => {
         if (!mentorParam || !moduleAccessResolved || !mentorsLoaded) {
             return;
         }
-        if (handledMentorParamRef.current === mentorParam) {
+        if (handledMentorParamRef.current === mentorParam || !moduleAccessAllowed) {
             return;
         }
         handledMentorParamRef.current = mentorParam;
-        if (!moduleAccessAllowed) {
-            return;
-        }
         const mentor = mentorList.find((item) => String(item.id) === mentorParam);
         if (!mentor || !isMentorFree(mentor)) {
             setShowUnlockSheet(true);
@@ -470,53 +511,28 @@ const filteredMentors = useMemo(() => {
         setSelectedMentorId(String(mentorList[index].id));
         setShowBookingPanel(false);
     });
+    // Module access always comes from the server check (same as the user portal's
+    // useVerifiedAccessStatus). Route params such as accessStatus / moduleId are never trusted:
+    // the "Book Your Mentor" module id is looked up from the server too.
     useEffect(() => {
         let isMounted = true;
 
         const resolveModuleAccess = async () => {
-            const explicitStatus = String(params.accessStatus || '').toLowerCase();
-
-            if (explicitStatus === 'locked') {
-                if (isMounted) {
-                    setModuleAccessAllowed(false);
-                    setModuleAccessPreview(false);
-                    setModuleAccessMessage('Please purchase a subscription to continue accessing this module.');
-                    setModuleAccessMode('locked');
-                    setModuleAccessResolved(true);
-                }
-                return;
-            }
-
-            if (explicitStatus === 'unlocked' || explicitStatus === 'preview') {
-                if (isMounted) {
-                    setModuleAccessAllowed(true);
-                    setModuleAccessPreview(explicitStatus === 'preview');
-                    setModuleAccessMessage('');
-                    setModuleAccessMode(explicitStatus === 'unlocked' ? 'full' : 'preview');
-                    setModuleAccessResolved(true);
-                }
-                return;
-            }
-
+            setModuleAccessResolved(false);
+            setModuleAccessError('');
             try {
-                let moduleId = Number(params.moduleId);
+                const modules = await getModules();
+                const matchedModule = modules.find((module) => normalizeModuleTitle(module?.title) === 'book your mentor')
+                    || modules.find((module) => normalizeModuleTitle(module?.title).includes('book your mentor'));
+                const moduleId = Number(matchedModule?.id);
 
                 if (!Number.isFinite(moduleId)) {
-                    const modules = await getModules();
-                    const matchedModule = modules.find((module) => normalizeModuleTitle(module?.title) === 'book your mentor')
-                        || modules.find((module) => normalizeModuleTitle(module?.title).includes('book your mentor'));
-
-                    moduleId = Number(matchedModule?.id);
-                    if (isMounted && Number.isFinite(moduleId)) {
-                        setResolvedModuleId(moduleId);
-                    }
-                }
-
-                if (!Number.isFinite(moduleId)) {
+                    // No such module configured: preview rules (only the free mentors open), never full access.
                     if (isMounted) {
                         setModuleAccessAllowed(true);
                         setModuleAccessPreview(false);
                         setModuleAccessMessage('');
+                        setModuleAccessMode('preview');
                         setModuleAccessResolved(true);
                     }
                     return;
@@ -535,10 +551,13 @@ const filteredMentors = useMemo(() => {
                 setModuleAccessResolved(true);
             } catch (error) {
                 console.log('Module access check failed', error?.response?.data || error?.message || error);
+                // Fail closed: an access-check error never opens the module; the user can retry.
                 if (isMounted) {
-                    setModuleAccessAllowed(true);
+                    setModuleAccessAllowed(false);
                     setModuleAccessPreview(false);
+                    setModuleAccessMode('');
                     setModuleAccessMessage('');
+                    setModuleAccessError('We could not check your subscription access. Please check your internet connection and try again.');
                     setModuleAccessResolved(true);
                 }
             }
@@ -549,7 +568,7 @@ const filteredMentors = useMemo(() => {
         return () => {
             isMounted = false;
         };
-    }, [params.accessStatus, params.moduleId]);
+    }, [accessCheckAttempt]);
     useEffect(() => {
     const fetchCategories = async () => {
         try {
@@ -580,75 +599,6 @@ const filteredMentors = useMemo(() => {
     fetchCategories();
 }, []);
     useEffect(() => {
-        let isMounted = true;
-
-        const resolveModuleAccess = async () => {
-            const explicitStatus = String(params.accessStatus || '').toLowerCase();
-
-            if (explicitStatus === 'locked') {
-                if (isMounted) {
-                    setModuleAccessAllowed(false);
-                    setModuleAccessPreview(false);
-                    setModuleAccessMessage('Please purchase a subscription to continue accessing this module.');
-                    setModuleAccessMode('locked');
-                    setModuleAccessResolved(true);
-                }
-                return;
-            }
-
-            try {
-                let moduleId = Number(params.moduleId);
-
-                if (!Number.isFinite(moduleId)) {
-                    const modules = await getModules();
-                    const matchedModule = modules.find((module) => normalizeModuleTitle(module?.title) === 'book your mentor')
-                        || modules.find((module) => normalizeModuleTitle(module?.title).includes('book your mentor'));
-
-                    moduleId = Number(matchedModule?.id);
-                    if (isMounted && Number.isFinite(moduleId)) {
-                        setResolvedModuleId(moduleId);
-                    }
-                }
-
-                if (!Number.isFinite(moduleId)) {
-                    if (isMounted) {
-                        setModuleAccessAllowed(true);
-                        setModuleAccessPreview(false);
-                        setModuleAccessMessage('');
-                        setModuleAccessResolved(true);
-                    }
-                    return;
-                }
-
-                const response = await checkModuleAccess(moduleId);
-                if (!isMounted) {
-                    return;
-                }
-
-                setResolvedModuleId(moduleId);
-                setModuleAccessAllowed(Boolean(response?.allowed));
-                setModuleAccessPreview(Boolean(response?.freePreview));
-                setModuleAccessMessage(response?.message || '');
-                setModuleAccessMode(String(response?.mode || '').toLowerCase());
-                setModuleAccessResolved(true);
-            } catch (error) {
-                console.log('Module access check failed', error?.response?.data || error?.message || error);
-                if (isMounted) {
-                    setModuleAccessAllowed(true);
-                    setModuleAccessPreview(false);
-                    setModuleAccessMessage('');
-                    setModuleAccessResolved(true);
-                }
-            }
-        };
-
-        resolveModuleAccess();
-
-        return () => {
-            isMounted = false;
-        };
-    }, [params.accessStatus, params.moduleId]);
-    useEffect(() => {
         if (!booked) {
             celebration.setValue(0);
             return;
@@ -660,83 +610,168 @@ const filteredMentors = useMemo(() => {
             bounciness: 10,
         }).start();
     }, [booked, celebration]);
+    const refreshBookedSlots = async ({ clearSelection = false } = {}) => {
+        if (!activeMentor?.id || !selectedDate) {
+            return;
+        }
+        if (clearSelection) {
+            setSelectedSlot('');
+        }
+        setBookedSlotsLoading(true);
+        try {
+            setBookedSlots(await getBookedMentorSlots(activeMentor.id, selectedDate));
+            setBookedSlotsError('');
+        } catch (refreshError) {
+            setBookedSlotsError(refreshError?.response?.data?.message || refreshError?.message || 'Failed to refresh booked slots.');
+        } finally {
+            setBookedSlotsLoading(false);
+        }
+    };
+    const confirmBooking = async (verifyPayload, bookingInfo) => {
+        await verifyMentorPayment(verifyPayload);
+        setPendingVerification(null);
+        setPaymentReference(bookingInfo.paymentReference);
+        addBooking({
+            id: `booking-${bookingInfo.mentorName}-${verifyPayload.date}-${verifyPayload.timeSlot}`,
+            mentorName: bookingInfo.mentorName,
+            date: verifyPayload.date,
+            time: verifyPayload.timeSlot,
+            status: 'Confirmed',
+            transactionId: bookingInfo.paymentReference,
+        });
+        setBooked(true);
+    };
+    // The money is already captured here, so the student always gets the payment id and a next step
+    // (same wording as the user portal).
+    const handleVerifyFailure = (error, verifyPayload, bookingInfo) => {
+        const status = error?.response?.status;
+        const reason = error?.response?.data?.message || error?.message || 'verification failed';
+        const paymentId = verifyPayload.razorpay_payment_id;
+        const temporaryFailure = !error?.response || status >= 500;
+
+        if (status === 409) {
+            // Slot was booked by someone else between order and payment; the server refunds it when it can.
+            setPaymentNotice(`${reason} Payment id: ${paymentId}.`);
+            setPendingVerification(null);
+        }
+        else if (temporaryFailure) {
+            setPaymentNotice(`Payment received but your booking could not be confirmed yet (${reason}). Tap "Retry confirmation", or contact support with payment id ${paymentId}.`);
+            setPendingVerification({ verifyPayload, bookingInfo });
+        }
+        else {
+            setPaymentNotice(`Payment received but your booking could not be confirmed (${reason}). Please contact support with payment id ${paymentId}.`);
+            setPendingVerification(null);
+        }
+        refreshBookedSlots({ clearSelection: status === 409 });
+    };
+    const retryPendingVerification = async () => {
+        if (!pendingVerification || payingRef.current) {
+            return;
+        }
+        payingRef.current = true;
+        setIsPaying(true);
+        setPaymentNotice('');
+        const { verifyPayload, bookingInfo } = pendingVerification;
+        try {
+            await confirmBooking(verifyPayload, bookingInfo);
+        }
+        catch (error) {
+            handleVerifyFailure(error, verifyPayload, bookingInfo);
+        }
+        finally {
+            payingRef.current = false;
+            setIsPaying(false);
+        }
+    };
     const handlePayment = async () => {
         if (!activeMentor || !selectedDate || !selectedSlot) {
             return;
         }
-
+        // In-flight guard: a double tap must never create a second order / checkout.
+        if (payingRef.current) {
+            return;
+        }
+        payingRef.current = true;
+        setIsPaying(true);
         setPaymentNotice('');
         try {
-            const orderResponse = await createMentorOrder({
-                mentorId: activeMentor.id,
-                date: selectedDate,
-                timeSlot: selectedSlot,
-            });
+            let orderResponse;
+            try {
+                orderResponse = await createMentorOrder({
+                    mentorId: activeMentor.id,
+                    date: selectedDate,
+                    timeSlot: selectedSlot,
+                });
+            }
+            catch (error) {
+                const message = error?.response?.status === 409
+                    ? 'This time slot is already booked. Please choose another time slot.'
+                    : error?.response?.data?.message || error?.message || 'Booking payment failed. Please try again.';
+                setPaymentNotice(message);
+                if (error?.response?.status === 409) {
+                    await refreshBookedSlots({ clearSelection: true });
+                }
+                return;
+            }
 
             const order = orderResponse?.order;
             const key = orderResponse?.key;
 
             if (!order?.id || !key) {
-                throw new Error('Failed to initiate Razorpay checkout.');
+                setPaymentNotice('Failed to initiate Razorpay checkout.');
+                return;
             }
 
-            const paymentResponse = await openRazorpayCheckout({
-                key,
-                amount: Number(order.amount),
-                currency: order.currency,
-                order_id: order.id,
-                name: 'CareerMap',
-                description: `Mentor booking with ${activeMentor.name}`,
-                prefill: {
-                    name: userProfile?.name || '',
-                    email: userProfile?.email || '',
-                    contact: userProfile?.mobile || '',
-                },
-                theme: {
-                    color: palette.primary,
-                },
-            });
+            let paymentResponse;
+            try {
+                paymentResponse = await openRazorpayCheckout({
+                    key,
+                    amount: Number(order.amount),
+                    currency: order.currency,
+                    order_id: order.id,
+                    name: 'CareerMap',
+                    description: `Mentor booking with ${activeMentor.name}`,
+                    prefill: {
+                        name: userProfile?.name || '',
+                        email: userProfile?.email || '',
+                        contact: userProfile?.mobile || '',
+                    },
+                    theme: {
+                        color: palette.primary,
+                    },
+                });
+            }
+            catch (checkoutError) {
+                // Closing the sheet is a cancel, not a failure; gateway failures show Razorpay's own reason.
+                const { cancelled, message } = getCheckoutErrorInfo(checkoutError);
+                if (!cancelled) {
+                    setPaymentNotice(message);
+                }
+                return;
+            }
 
-            await verifyMentorPayment({
+            const verifyPayload = {
                 mentorId: activeMentor.id,
                 date: selectedDate,
                 timeSlot: selectedSlot,
                 razorpay_order_id: paymentResponse?.razorpay_order_id || order.id,
                 razorpay_payment_id: paymentResponse?.razorpay_payment_id,
                 razorpay_signature: paymentResponse?.razorpay_signature,
-            });
-
-            const finalPaymentReference = paymentResponse?.razorpay_payment_id || order.id;
-            setPaymentReference(finalPaymentReference);
-            addBooking({
-                id: `booking-${activeMentor.name}-${selectedDate}-${selectedSlot}`,
+            };
+            const bookingInfo = {
                 mentorName: activeMentor.name,
-                date: selectedDate,
-                time: selectedSlot,
-                status: 'Confirmed',
-                transactionId: finalPaymentReference,
-            });
-            setBooked(true);
+                paymentReference: paymentResponse?.razorpay_payment_id || order.id,
+            };
+            try {
+                await confirmBooking(verifyPayload, bookingInfo);
+            }
+            catch (verifyError) {
+                handleVerifyFailure(verifyError, verifyPayload, bookingInfo);
+            }
         }
-        catch (error) {
-            const message = error?.response?.status === 409
-                ? 'This time slot is already booked. Please choose another time slot.'
-                : error?.response?.data?.message || error?.message || 'Booking payment failed. Please try again.';
-            if (!/cancelled/i.test(message)) {
-                setPaymentNotice(message);
-            }
-            if (error?.response?.status === 409 && activeMentor?.id && selectedDate) {
-                setSelectedSlot('');
-                setBookedSlotsLoading(true);
-                try {
-                    setBookedSlots(await getBookedMentorSlots(activeMentor.id, selectedDate));
-                    setBookedSlotsError('');
-                } catch (refreshError) {
-                    setBookedSlotsError(refreshError?.response?.data?.message || refreshError?.message || 'Failed to refresh booked slots.');
-                } finally {
-                    setBookedSlotsLoading(false);
-                }
-            }
+        finally {
+            payingRef.current = false;
+            setIsPaying(false);
         }
     };
 
@@ -752,6 +787,20 @@ const filteredMentors = useMemo(() => {
                 <ActivityIndicator size="large" color={palette.primary} />
                 <Text className={`text-[16px] font-black ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>Checking access...</Text>
                 <Text className={`text-center text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>We are confirming whether your subscription can open the mentor module.</Text>
+            </View>
+        </Screen>);
+    }
+    if (moduleAccessError) {
+        return (<Screen animationKey="book-mentor-access-error">
+            <SectionHeader title="Book Your Mentor" subtitle="We could not confirm your access." />
+            <View className={`gap-3 rounded-[26px] border p-6 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`}>
+                <View className="h-12 w-12 items-center justify-center rounded-[16px]" style={{ backgroundColor: `${palette.primary}14` }}>
+                    <Ionicons name="cloud-offline-outline" size={22} color={palette.primary} />
+                </View>
+                <Text className={`text-[14px] leading-[22px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{moduleAccessError}</Text>
+                <AnimatedPressable className="rounded-[16px] bg-brand py-[14px]" onPress={() => setAccessCheckAttempt((value) => value + 1)}>
+                    <Text className="text-center text-[14px] font-extrabold text-white">Retry</Text>
+                </AnimatedPressable>
             </View>
         </Screen>);
     }
@@ -906,8 +955,8 @@ const filteredMentors = useMemo(() => {
                 <Text className="flex-1 text-[11px] font-bold text-success">Your payment is secured with 256-bit SSL encryption</Text>
             </View>
 
-            <AnimatedPressable className="rounded-[16px] bg-brand py-[14px]" disabled={!canPay} onPress={handlePayment}>
-                <Text className="text-center text-[14px] font-extrabold text-white">Pay {mentor.price} & Confirm</Text>
+            <AnimatedPressable className="rounded-[16px] bg-brand py-[14px]" disabled={!canPay || isPaying} onPress={handlePayment} style={{ opacity: !canPay || isPaying ? 0.6 : 1 }}>
+                {isPaying ? <ActivityIndicator color="#ffffff" /> : <Text className="text-center text-[14px] font-extrabold text-white">Pay {mentor.price} & Confirm</Text>}
             </AnimatedPressable>
         </Screen>);
     }
@@ -972,7 +1021,8 @@ const filteredMentors = useMemo(() => {
     </AnimatedPressable>
   )}
 
-  {/* Book Now Button (Right) */}
+  {/* Book Now Button (Right) - only when the mentor has future slots */}
+  {dates.length ? (
   <AnimatedPressable
     className="rounded-full bg-brand px-4 py-2"
     onPress={openBookingPanel}
@@ -981,6 +1031,13 @@ const filteredMentors = useMemo(() => {
       Book Now
     </Text>
   </AnimatedPressable>
+  ) : (
+  <View className={`rounded-full px-4 py-2 ${preferences.darkMode ? 'bg-[#111111]' : 'bg-[#f2ebe6]'}`}>
+    <Text className={`text-[12px] font-extrabold ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>
+      No slots available
+    </Text>
+  </View>
+  )}
 
 </View>
                 <View className="items-center gap-2 pt-6">
@@ -1074,6 +1131,7 @@ const filteredMentors = useMemo(() => {
 
                         <View className={`gap-2 rounded-[22px] border p-4 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#111111]' : 'border-line bg-[#fcf8f5]'}`}>
                             <Text className={`text-[18px] font-black ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>Select Date</Text>
+                            {!dates.length ? <Text className={`text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No slots available for this mentor right now.</Text> : null}
                             <View className="flex-row flex-wrap gap-2.5">
                                 {dates.map((date) => (<Pressable key={date.key} disabled={!date.available} onPress={() => {
                                         setSelectedDate(date.key);
@@ -1105,13 +1163,19 @@ const filteredMentors = useMemo(() => {
                                             </Pressable>);
                                     })}
                                 </View>
+                                <Text className="text-[11px] font-semibold text-muted">All times are in IST (India Standard Time).</Text>
                                 {bookedSlotsLoading ? <Text className="text-[11px] font-semibold text-muted">Checking booked times...</Text> : null}
                                 {bookedSlotsError ? <Text className="text-[11px] font-semibold text-[#9a2119]">{bookedSlotsError}</Text> : null}
                             </View>) : null}
 
-                        {paymentNotice ? <Text accessibilityRole="alert" className="rounded-[12px] border border-[#f2c7c2] bg-[#fff4f2] px-3 py-2 text-[12px] font-semibold text-[#9a2119]">{paymentNotice}</Text> : null}
-                        <AnimatedPressable className="rounded-[16px] bg-brand py-[14px]" disabled={!selectedDate || !selectedSlot || bookedSlotsLoading || Boolean(bookedSlotsError)} onPress={handlePayment}>
-                            <Text className="text-center text-[14px] font-extrabold text-white">Book & Pay</Text>
+                        {paymentNotice ? <Text accessibilityRole="alert" selectable className="rounded-[12px] border border-[#f2c7c2] bg-[#fff4f2] px-3 py-2 text-[12px] font-semibold text-[#9a2119]">{paymentNotice}</Text> : null}
+                        {pendingVerification ? (
+                            <AnimatedPressable className="rounded-[16px] border border-brand py-[12px]" disabled={isPaying} onPress={retryPendingVerification} style={{ opacity: isPaying ? 0.6 : 1 }}>
+                                <Text className="text-center text-[14px] font-extrabold text-brand">Retry confirmation</Text>
+                            </AnimatedPressable>
+                        ) : null}
+                        <AnimatedPressable className="rounded-[16px] bg-brand py-[14px]" disabled={!selectedDate || !selectedSlot || bookedSlotsLoading || Boolean(bookedSlotsError) || isPaying} onPress={handlePayment} style={{ opacity: isPaying ? 0.6 : 1 }}>
+                            {isPaying ? <ActivityIndicator color="#ffffff" /> : <Text className="text-center text-[14px] font-extrabold text-white">Book & Pay</Text>}
                         </AnimatedPressable>
                     </View>
                 </View>

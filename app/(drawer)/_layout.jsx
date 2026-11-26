@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { Redirect, router } from 'expo-router';
 import { Drawer } from 'expo-router/drawer';
-import { Text, View } from 'react-native';
+import { Alert, Text, View } from 'react-native';
 import { useEffect, useState } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { useAppState } from '../../src/app-state';
@@ -103,13 +103,23 @@ export default function DrawerRoot() {
                 },
             });
         } catch (error) {
+            // Fail closed: when access cannot be checked (offline, timeout, server error) the module stays shut
+            // instead of opening without the check.
             console.log('Drawer module access check failed', error?.response?.data || error?.message || error);
-            router.push(config.path);
+            Alert.alert(
+                `Could not open ${config.title}`,
+                'We could not check your access right now. Please check your connection and try again.'
+            );
         }
     };
     const moduleDrawerListeners = (routeKey) => ({
         drawerItemPress: (event) => { void handleModuleDrawerPress(event, routeKey); },
     });
+    // Auth guard: every screen in this group needs a session. After a forced logout, or when a deep link
+    // opens a drawer screen without one, go to the login options instead of showing empty logged-in screens.
+    if (!hasSession) {
+        return <Redirect href="/auth-entry"/>;
+    }
     return (<GestureHandlerRootView style={{ flex: 1 }}>
         <Drawer screenOptions={{
             header: () => <AppHeader />,

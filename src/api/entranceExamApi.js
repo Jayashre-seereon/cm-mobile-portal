@@ -1,4 +1,6 @@
 import api from './axios';
+import { formatIstDate } from '../utils/deadlineStatus';
+import { normalizeExternalUrl } from '../utils/openExternalUrl';
 
 function stripHtml(value) {
   if (!value) {
@@ -27,26 +29,15 @@ function formatDate(value) {
     return 'Date not available';
   }
 
-  const parsedDate = new Date(value);
-
-  if (Number.isNaN(parsedDate.getTime())) {
-    return value;
-  }
-
-  return parsedDate.toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  // IST calendar date, the same date the Upcoming / Closed status is computed from.
+  return formatIstDate(value) || String(value);
 }
 
 function formatApplicationDate(value, eligibility) {
   if (String(eligibility || '').trim().toLowerCase() !== 'true' || !value || value === 'Date not available') {
     return formatDate(value);
   }
-  const parsedDate = new Date(value);
-  if (Number.isNaN(parsedDate.getTime())) return value;
-  return parsedDate.toLocaleDateString('en-IN', { month: 'long', year: 'numeric' });
+  return formatIstDate(value, { monthYear: true }) || String(value);
 }
 
 function formatSubjects(subjects) {
@@ -103,7 +94,8 @@ function mapEntranceExam(item, index) {
     aboutHtml: item?.about || '',
     examPattern: formatPattern(item?.exam_pattern),
     topColleges: formatTopColleges(item?.top_institution),
-    website: item?.url || '#',
+    // Only a valid http(s) link (scheme added when missing); '#' means "no website" and hides the button.
+    website: normalizeExternalUrl(item?.url) || '#',
     categoryId: item?.categoryId ?? categoryObj?.id ?? null,
     secondcategoryId: item?.secondcategoryId ?? secondcategoryObj?.id ?? null,
     subcategoryId: item?.subcategoryId ?? subcategoryObj?.id ?? null,

@@ -130,6 +130,7 @@ if (step === 8 && userType === 'student')
         const onboardingData = {
             userType,
             name,
+            gender,
             childName,
             selectedClass: selectedClass === 'Other' ? otherClass.trim() : selectedClass,
             selectedStream: selectedStream === 'Other' ? otherStream.trim() : selectedStream,

@@ -14,6 +14,7 @@ import { AnimatedPressable, Screen, SectionHeader, UnlockBottomSheet } from '../
 import { openSubscriptionPrompt } from '../../src/subscription-flow';
 import { useSearchDeepLink } from '../../src/utils/searchNavigation';
 import { buildFreeKeys, isPreviewFree } from '../../src/utils/previewAccess';
+import { useAuthStore } from '../../src/store/auth-store';
 
 const INITIAL_CONSULT_FORM = {
     fullName: '',
@@ -209,11 +210,33 @@ function toApiDate(value) {
         : '';
 }
 
-function formatDisplayDate(value) {
-    const apiDate = toApiDate(value);
-    if (!apiDate) return String(value || '');
-    const [year, month, day] = apiDate.split('-');
-    return `${day}/${month}/${year}`;
+// Today's local date as YYYY-MM-DD (comparable with toApiDate's output).
+function todayApiDate() {
+    const now = new Date();
+    return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+}
+
+const MIN_BIRTH_DATE = new Date(1900, 0, 1);
+
+/*
+ * Consultation form draft kept in memory (never in route params / navigation state) while the
+ * user goes through the subscription flow. Owned by one user; restored into the form on return,
+ * where the user must tap Submit again.
+ */
+let consultationDraft = null;
+
+function pickConsultFormFields(source) {
+    const picked = {};
+    Object.keys(INITIAL_CONSULT_FORM).forEach((key) => {
+        const initial = INITIAL_CONSULT_FORM[key];
+        const value = source?.[key];
+        if (Array.isArray(initial)) {
+            if (Array.isArray(value)) picked[key] = value.map(String);
+        } else if (typeof value === 'string') {
+            picked[key] = value;
+        }
+    });
+    return picked;
 }
 
 function parsePickerDate(value) {
@@ -254,7 +277,7 @@ export default function AbroadScreen() {
     // confirms full access (moduleStatus, set below). Only then are the lock badges hidden and
     // consultations allowed; in preview even a free destination still needs a plan to consult.
     const hasPlanAccess = isUnlocked('abroad-consultancy');
-    const autoSubmitHandledRef = useRef('');
+    const draftOwnerKey = useAuthStore((state) => String(state.user?.id ?? state.user?._id ?? ''));
     const [countries, setCountries] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [loadError, setLoadError] = useState('');
@@ -306,7 +329,6 @@ const PG_PROGRAMS = [
             : [];
 
         return {
-            studyAbroadId: selectedStudyAbroadId,
             ...consultationDetails,
             dateOfBirth: toApiDate(consultationDetails.dateOfBirth),
             englishTestScoreDate: toApiDate(consultationDetails.englishTestScoreDate) || consultationDetails.englishTestScoreDate.trim(),
@@ -318,16 +340,10 @@ const PG_PROGRAMS = [
             courseInterest: preferredCourseProgramme,
             preferredIntake: consultationDetails.preferredIntake.trim(),
             message: consultationDetails.message.trim(),
+            // Last, so nothing in the form can override the destination currently selected.
+            studyAbroadId: selectedStudyAbroadId,
         };
     }, [consultationDetails, preferredCountry, selectedStudyAbroadId]);
-
-    const encodedConsultationPayload = useMemo(() => {
-        if (!consultationPayload) {
-            return undefined;
-        }
-
-        return encodeURIComponent(JSON.stringify(consultationPayload));
-    }, [consultationPayload]);
 
     const animationKey = submitted
         ? 'submitted'
@@ -336,24 +352,35 @@ const PG_PROGRAMS = [
             : selected !== null
                 ? `country-${selected}`
                 : 'country-list';
+    // Return target after subscribing: only which screen to reopen - the form details stay in
+    // memory (consultationDraft), not in the route params.
     const formReturnTarget = useMemo(() => ({
         pathname: '/(drawer)/abroad',
         params: {
             selected: selected !== null ? String(selected) : undefined,
             showForm: 'true',
             preferredCountry: preferredCountry || undefined,
-            autoSubmitAfterReturn: 'true',
-            consultationPayload: encodedConsultationPayload,
+            restoreDraft: '1',
         },
-    }), [encodedConsultationPayload, preferredCountry, selected]);
+    }), [preferredCountry, selected]);
+    const openFormSubscriptionPrompt = () => {
+        consultationDraft = { ownerKey: draftOwnerKey, details: pickConsultFormFields(consultationDetails), preferredCountry };
+        openSubscriptionPrompt(formReturnTarget);
+    };
 
     const handleSubmitConsultation = useCallback(async () => {
         if (!consultationDetails.fullName.trim()) {
             setSubmitError('Please enter your full name.');
             return;
         }
-        if (!toApiDate(consultationDetails.dateOfBirth)) {
+        const birthDate = toApiDate(consultationDetails.dateOfBirth);
+        if (!birthDate) {
             setSubmitError('Please enter or select your date of birth in DD/MM/YYYY format.');
+            return;
+        }
+        // Same rule as the user portal: not in the future, not before 1900.
+        if (birthDate > todayApiDate() || birthDate < '1900-01-01') {
+            setSubmitError('Please enter a valid date of birth.');
             return;
         }
         if (!consultationDetails.gender) {
@@ -386,6 +413,10 @@ const PG_PROGRAMS = [
         }
         if (consultationDetails.passportExpiryDate && !toApiDate(consultationDetails.passportExpiryDate)) {
             setSubmitError('Enter passport expiry date in valid DD/MM/YYYY format.');
+            return;
+        }
+        if (consultationDetails.passportExpiryDate && toApiDate(consultationDetails.passportExpiryDate) < todayApiDate()) {
+            setSubmitError('Passport expiry date cannot be in the past.');
             return;
         }
         if (!consultationPayload) {
@@ -514,53 +545,20 @@ const PG_PROGRAMS = [
             setPreferredCountry(params.preferredCountry);
         }
 
-        if (typeof params.consultationPayload === 'string') {
-            try {
-                const decodedPayload = JSON.parse(decodeURIComponent(params.consultationPayload));
-
-                setConsultationDetails((current) => ({
-                    ...current,
-                    ...decodedPayload,
-                    preferredCourseProgramme: String(decodedPayload.preferredCourseProgramme || decodedPayload.courseInterest || current.preferredCourseProgramme || ''),
-                    preferredIntake: decodedPayload?.preferredIntake ? String(decodedPayload.preferredIntake) : current.preferredIntake,
-                    message: decodedPayload?.message ? String(decodedPayload.message) : current.message,
-                    dateOfBirth: decodedPayload?.dateOfBirth ? formatDisplayDate(decodedPayload.dateOfBirth) || String(decodedPayload.dateOfBirth) : current.dateOfBirth,
-                    englishTestScoreDate: decodedPayload?.englishTestScoreDate ? formatDisplayDate(decodedPayload.englishTestScoreDate) || String(decodedPayload.englishTestScoreDate) : current.englishTestScoreDate,
-                    entranceExamScoreDate: decodedPayload?.entranceExamScoreDate ? formatDisplayDate(decodedPayload.entranceExamScoreDate) || String(decodedPayload.entranceExamScoreDate) : current.entranceExamScoreDate,
-                    passportExpiryDate: decodedPayload?.passportExpiryDate ? formatDisplayDate(decodedPayload.passportExpiryDate) || String(decodedPayload.passportExpiryDate) : current.passportExpiryDate,
-                    primaryFundingSource: Array.isArray(decodedPayload.primaryFundingSource) ? decodedPayload.primaryFundingSource : current.primaryFundingSource,
-                    preferredCountries: Array.isArray(decodedPayload.preferredCountries) ? decodedPayload.preferredCountries : current.preferredCountries,
-                    otherEntranceExams: Array.isArray(decodedPayload.otherEntranceExams) ? decodedPayload.otherEntranceExams : current.otherEntranceExams,
-                    topPriorities: Array.isArray(decodedPayload.topPriorities) ? decodedPayload.topPriorities : current.topPriorities,
-                    documentsAvailable: Array.isArray(decodedPayload.documentsAvailable) ? decodedPayload.documentsAvailable : current.documentsAvailable,
-                    servicesRequired: Array.isArray(decodedPayload.servicesRequired) ? decodedPayload.servicesRequired : current.servicesRequired,
-                }));
-
-                if (decodedPayload?.preferredCountry) {
-                    setPreferredCountry(String(decodedPayload.preferredCountry));
+        // Back from the subscription flow: pre-fill the form from the in-memory draft (same user
+        // only, known fields only). The user reviews it and taps Submit again - no auto-submit.
+        if (params.restoreDraft === '1' && consultationDraft) {
+            const draft = consultationDraft;
+            consultationDraft = null;
+            if (draft.ownerKey === draftOwnerKey) {
+                setConsultationDetails((current) => ({ ...current, ...pickConsultFormFields(draft.details) }));
+                if (typeof draft.preferredCountry === 'string' && draft.preferredCountry) {
+                    setPreferredCountry(draft.preferredCountry);
                 }
             }
-            catch {
-                // Ignore malformed return payloads and keep the user's current inputs.
-            }
         }
-    }, [params.consultationPayload, params.preferredCountry, params.selected, params.showForm]);
+    }, [params.restoreDraft, params.preferredCountry, params.selected, params.showForm, draftOwnerKey]);
 
-    useEffect(() => {
-        const shouldAutoSubmit = params.autoSubmitAfterReturn === 'true' && params.consultationPayload;
-
-        if (!shouldAutoSubmit || !unlocked || submitted || isSubmitting || !consultationPayload) {
-            return;
-        }
-
-        const autoSubmitKey = `${params.autoSubmitAfterReturn}:${params.consultationPayload}`;
-        if (autoSubmitHandledRef.current === autoSubmitKey) {
-            return;
-        }
-
-        autoSubmitHandledRef.current = autoSubmitKey;
-        void handleSubmitConsultation();
-    }, [consultationPayload, handleSubmitConsultation, isSubmitting, params.autoSubmitAfterReturn, params.consultationPayload, submitted, unlocked]);
     // Global search / Career Bee: open the destination with the same lock rule as its card.
     useSearchDeepLink(params.searchKey, !isLoading && moduleAccessResolved, () => {
         const countryId = typeof params.countryId === 'string' ? params.countryId : '';
@@ -613,6 +611,8 @@ const closeDatePicker = () => setDatePickerField(null);
         const picker = (
             <DateTimePicker
                 value={datePickerValue}
+                {...(datePickerField === 'dateOfBirth' ? { maximumDate: new Date(), minimumDate: MIN_BIRTH_DATE } : {})}
+                {...(datePickerField === 'passportExpiryDate' ? { minimumDate: new Date() } : {})}
                 mode="date"
                 display={Platform.OS === 'ios' ? 'spinner' : 'default'}
                 onChange={handleDateChange}
@@ -757,7 +757,7 @@ const closeDatePicker = () => setDatePickerField(null);
           <FormField label="Tell us anything else about your study plans..." value={consultationDetails.message} onChangeText={(value) => updateConsultationDetail('message', value)} placeholder="Tell us anything else about your study plans..." darkMode={darkMode} multiline/>
 
           {submitError ? (<Text className="text-[13px] font-semibold text-brand">{submitError}</Text>) : null}
-          <AnimatedPressable className="rounded-[16px] bg-brand py-[14px]" onPress={unlocked ? handleSubmitConsultation : () => openSubscriptionPrompt(formReturnTarget)} disabled={isSubmitting}>
+          <AnimatedPressable className="rounded-[16px] bg-brand py-[14px]" onPress={unlocked ? handleSubmitConsultation : openFormSubscriptionPrompt} disabled={isSubmitting}>
             <Text className="text-center text-[14px] font-extrabold text-white">{isSubmitting ? 'Submitting...' : unlocked ? 'Submit Consultation' : 'Subscribe to Submit'}</Text>
           </AnimatedPressable>
         </View>
@@ -813,7 +813,7 @@ const closeDatePicker = () => setDatePickerField(null);
         </View>
         {showUnlockSheet ? (<UnlockBottomSheet title="Unlock Study Abroad" subtitle="Subscribe to more country details, scholarships, visa guidance, and counselling access." onClose={() => setShowUnlockSheet(false)} onPress={() => {
                     setShowUnlockSheet(false);
-                    openSubscriptionPrompt(formReturnTarget);
+                    openFormSubscriptionPrompt();
                 }}/>) : null}
       </Screen>);
     }
@@ -904,7 +904,11 @@ const closeDatePicker = () => setDatePickerField(null);
       </View>
       {showUnlockSheet ? (<UnlockBottomSheet title="Unlock Study Abroad" subtitle="Subscribe to more country details, scholarships, visa guidance, and counselling access." onClose={() => setShowUnlockSheet(false)} onPress={() => {
                 setShowUnlockSheet(false);
-                openSubscriptionPrompt(showForm ? formReturnTarget : { pathname: '/(drawer)/abroad' });
+                if (showForm) {
+                    openFormSubscriptionPrompt();
+                } else {
+                    openSubscriptionPrompt({ pathname: '/(drawer)/abroad' });
+                }
             }}/>) : null}
     </Screen>);
 }

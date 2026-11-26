@@ -1,22 +1,90 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, Text, View,useWindowDimensions } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Platform, ScrollView, Text, View,useWindowDimensions } from 'react-native';
 import { useAppState } from '../../src/app-state';
-import { createOrder, getPlans, verifyPayment } from '../../src/api/planApi';
+import { createOrder, getPlans } from '../../src/api/planApi';
 import { getAssessmentAccessStatus } from '../../src/api/psychometricAssessmentApi';
 import { palette, subscriptions as fallbackSubscriptions } from '../../src/careermap-data';
 import { AnimatedPressable, Pill, Screen, SectionHeader } from '../../src/careermap-ui';
 import { openRazorpayCheckout } from '../../src/utils/razorpay';
+import { flushPendingPayments, getPendingPayments, savePendingPayment, verifyPendingPayment } from '../../src/subscription-flow-pending';
+import { useAuthStore } from '../../src/store/auth-store';
 import RenderHTML from 'react-native-render-html';
+
+const SUPPORT_EMAIL = 'support@careermap.in';
+
+// react-native-razorpay rejects with { code, description } (description is often a JSON string);
+// the web shim rejects with Error('Payment was cancelled.'). Android code 0 / iOS code 2 = user cancelled.
+function getCheckoutErrorInfo(error) {
+    let details = null;
+    if (typeof error?.description === 'string') {
+        try {
+            details = JSON.parse(error.description)?.error || null;
+        }
+        catch {
+            details = null;
+        }
+    }
+    else if (error?.error && typeof error.error === 'object') {
+        details = error.error;
+    }
+    const rawDescription = details?.description || (typeof error?.description === 'string' ? error.description : '') || error?.message || '';
+    const nativeCancelCode = typeof error?.code === 'number'
+        && ((Platform.OS === 'android' && error.code === 0) || (Platform.OS === 'ios' && error.code === 2));
+    const cancelled = nativeCancelCode
+        || error?.code === 'PAYMENT_CANCELLED'
+        || details?.reason === 'payment_cancelled'
+        || /cancel/i.test(rawDescription);
+    return {
+        cancelled,
+        message: rawDescription && !/^\s*\{/.test(rawDescription)
+            ? rawDescription
+            : 'Payment failed. Please try again or use a different payment method.',
+    };
+}
+
+// Server explanation first ('Plan not found', ...); axios' generic 'Request failed with status code 400' last.
+function getApiErrorText(error, fallback) {
+    return error?.response?.data?.message || error?.message || fallback;
+}
+
+function findComparePlanMatch(plans, label) {
+    const wanted = String(label || '').trim().toLowerCase();
+    if (!wanted) return null;
+    return plans.find((plan) => String(plan?.name || '').trim().toLowerCase() === wanted)
+        || plans.find((plan) => String(plan?.name || '').toLowerCase().includes(wanted))
+        || null;
+}
+
 export default function SubscriptionScreen() {
-    const { activeSubscriptionPlanIds, preferences, userProfile } = useAppState();
+    const { activeSubscriptionPlanIds, preferences, userProfile, subscriptionRecords } = useAppState();
     const { width: screenWidth } = useWindowDimensions();
     const { returnTo } = useLocalSearchParams();
     const [plans, setPlans] = useState(fallbackSubscriptions);
     const [isLoading, setIsLoading] = useState(true);
+    const [loadError, setLoadError] = useState('');
     const [isProcessingPlan, setIsProcessingPlan] = useState('');
+    const [processingStage, setProcessingStage] = useState('');
+    const processingRef = useRef(false);
     const [isAssessmentLockedOrCompleted, setIsAssessmentLockedOrCompleted] = useState(false);
+
+    const getCurrentUserId = () => {
+        const user = useAuthStore.getState().user;
+        return String(user?.id ?? user?._id ?? '');
+    };
+
+    const getPlanBackendIds = (plan) => [plan?.apiId, plan?.raw?.id, plan?.raw?.planId]
+        .filter((id) => id !== null && id !== undefined && id !== '')
+        .map((id) => String(id).trim());
+
+    // Expiry of the user's active subscription for this plan (from /my-subscriptions).
+    const getCurrentPlanExpiry = (plan) => {
+        const ids = getPlanBackendIds(plan);
+        const record = (subscriptionRecords || []).find((item) => String(item?.status || '').toLowerCase() === 'active'
+            && ids.includes(String(item?.backendPlanId || '')));
+        return record?.expiryDate && record.expiryDate !== 'Expiry date not available' ? record.expiryDate : '';
+    };
 
     const hasAssessmentModule = (plan) => {
         const modules = Array.isArray(plan?.modules) ? plan.modules : Array.isArray(plan?.raw?.modules) ? plan.raw.modules : [];
@@ -35,32 +103,29 @@ export default function SubscriptionScreen() {
         return candidateIds.some((id) => planIds.includes(id)) || candidateNames.some((name) => planIds.includes(name));
     };
 
+    // Prices shown in the comparison come from the fetched plans (matched by name), so they always
+    // agree with the plan cards and the Razorpay order; an unmatched column shows no price.
     const comparePlans = [
         {
             label: 'Basic',
-            price: '₹1,500',
-            note: '',
             features: [true, false, false, false, false, false, false, false, false, false],
         },
         {
             label: 'Standard',
-            price: '₹3,000',
-            note: '',
             features: [true, true, true, true, false, false, false, false, false, false],
         },
         {
             label: 'Most Popular',
-            price: '₹5,000',
-            note: '',
             features: [true, true, true, true, true, true, true, true, false, false],
         },
         {
             label: 'Premium',
-            price: '₹7,500',
-            note: '(₹5,000 + ₹2,500)',
             features: [true, true, true, true, true, true, true, true, true, true],
         },
-    ];
+    ].map((column) => {
+        const match = findComparePlanMatch(plans, column.label);
+        return { ...column, price: match?.price || '', note: '' };
+    });
 
     const compareFeatures = [
         { label: 'Initial Career Guidance', notes: [null, null, null, null] },
@@ -81,6 +146,32 @@ export default function SubscriptionScreen() {
         'Students requiring complete career planning with year-long mentorship',
         'Students planning both their career and higher education abroad',
     ];
+    const loadPlans = useCallback(async (isActive = () => true) => {
+        setIsLoading(true);
+        setLoadError('');
+        try {
+            const response = await getPlans();
+            if (!isActive()) return;
+            if (response.length > 0) {
+                setPlans(response);
+            }
+            else {
+                setPlans([]);
+                setLoadError('No subscription plans are available right now. Please try again in a little while.');
+            }
+        }
+        catch (error) {
+            console.log('Plans fetch failed', error?.response?.data || error?.message || error);
+            if (isActive()) {
+                setLoadError(getApiErrorText(error, 'We could not load the subscription plans.') + ' Please check your connection and try again.');
+            }
+        }
+        finally {
+            if (isActive()) {
+                setIsLoading(false);
+            }
+        }
+    }, []);
     useEffect(() => {
         let isMounted = true;
         void getAssessmentAccessStatus().then((status) => {
@@ -90,85 +181,142 @@ export default function SubscriptionScreen() {
         }).catch(() => {
             if (isMounted) setIsAssessmentLockedOrCompleted(false);
         });
-        const loadPlans = async () => {
-            try {
-                const response = await getPlans();
-                if (isMounted && response.length > 0) {
-                    setPlans(response);
-                }
-            }
-            catch (error) {
-                console.log('Plans fetch failed', error?.response?.data || error?.message || error);
-            }
-            finally {
-                if (isMounted) {
-                    setIsLoading(false);
-                }
-            }
-        };
-        loadPlans();
+        void loadPlans(() => isMounted);
         return () => {
             isMounted = false;
         };
-    }, []);
+    }, [loadPlans]);
+    const goToPaymentSuccess = (plan, backendPlanId, orderId, paymentId) => {
+        router.replace({
+            pathname: '/payment-success',
+            params: {
+                planId: plan.id,
+                apiPlanId: String(backendPlanId),
+                orderId,
+                transactionId: paymentId || orderId,
+                ...(returnTo ? { returnTo } : {}),
+            },
+        });
+    };
+
+    const confirmRepurchase = (plan, expiry) => new Promise((resolve) => {
+        Alert.alert(
+            'You already have this plan',
+            `${plan.name} is active${expiry ? ` until ${expiry}` : ''}. Buying it again is charged in full and starts a new period from today; the remaining days of the current period are not added to it. Continue only if you need another assessment attempt.`,
+            [
+                { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+                { text: 'Buy again', onPress: () => resolve(true) },
+            ],
+            { cancelable: true, onDismiss: () => resolve(false) },
+        );
+    });
+
     const handleSelectPlan = async (plan) => {
-        if (!plan?.id || isProcessingPlan) {
+        // Ref guard: two taps delivered before React re-renders must not start two orders.
+        if (!plan?.id || processingRef.current) {
             return;
         }
+        processingRef.current = true;
 
         try {
             setIsProcessingPlan(plan.id);
+            setProcessingStage('order');
+            const userId = getCurrentUserId();
+
+            // A previous payment that was charged but not yet activated: finish it instead of charging again.
+            if (getPendingPayments(userId).length > 0) {
+                setProcessingStage('verifying');
+                const { stillPending } = await flushPendingPayments(userId);
+                if (stillPending > 0) {
+                    Alert.alert('Payment still being activated', `We received an earlier payment that is still being activated, so we have not started a new one. Please try again in a few minutes, or contact ${SUPPORT_EMAIL}.`);
+                    return;
+                }
+                setProcessingStage('order');
+            }
+
+            if (isCurrentPlan(plan)) {
+                const confirmed = await confirmRepurchase(plan, getCurrentPlanExpiry(plan));
+                if (!confirmed) return;
+            }
+
             const backendPlanId = plan.apiId || plan.raw?.id || plan.id;
-            const orderResponse = await createOrder(plan);
+            let orderResponse;
+            try {
+                orderResponse = await createOrder(plan);
+            }
+            catch (orderError) {
+                Alert.alert('Payment issue', getApiErrorText(orderError, 'Failed to initiate payment. Please try again.'));
+                return;
+            }
             const order = orderResponse?.order;
             const key = orderResponse?.key;
 
             if (!order?.id || !key) {
-                throw new Error('Failed to initiate Razorpay checkout.');
+                Alert.alert('Payment issue', orderResponse?.message || 'Failed to initiate payment. Please try again.');
+                return;
             }
 
-            const paymentResponse = await openRazorpayCheckout({
-                key,
-                amount: Number(order.amount),
-                currency: order.currency,
-                order_id: order.id,
-                name: 'CareerMap',
-                description: `${plan.name} subscription`,
-                prefill: {
-                    name: userProfile?.name || '',
-                    email: userProfile?.email || '',
-                    contact: userProfile?.mobile || '',
-                },
-                theme: {
-                    color: palette.primary,
-                },
-            });
+            let paymentResponse;
+            try {
+                paymentResponse = await openRazorpayCheckout({
+                    key,
+                    amount: Number(order.amount),
+                    currency: order.currency,
+                    order_id: order.id,
+                    name: 'CareerMap',
+                    description: `${plan.name} subscription`,
+                    prefill: {
+                        name: userProfile?.name || '',
+                        email: userProfile?.email || '',
+                        contact: userProfile?.mobile || '',
+                    },
+                    theme: {
+                        color: palette.primary,
+                    },
+                });
+            }
+            catch (checkoutError) {
+                // Closing the sheet is a cancel, not a failure; gateway failures show Razorpay's own reason.
+                const { cancelled, message } = getCheckoutErrorInfo(checkoutError);
+                if (!cancelled) {
+                    Alert.alert('Payment issue', message);
+                }
+                return;
+            }
 
-            await verifyPayment({
+            // Money is captured now: keep the proof on the device before calling the server.
+            const pending = {
+                userId,
                 planId: backendPlanId,
                 planKey: plan.id,
                 razorpay_order_id: paymentResponse?.razorpay_order_id || order.id,
                 razorpay_payment_id: paymentResponse?.razorpay_payment_id,
                 razorpay_signature: paymentResponse?.razorpay_signature,
-            });
+            };
+            savePendingPayment(pending);
+            setProcessingStage('verifying');
 
-            router.replace({
-                pathname: '/payment-success',
-                params: {
-                    planId: plan.id,
-                    transactionId: paymentResponse?.razorpay_payment_id || order.id,
-                    ...(returnTo ? { returnTo } : {}),
-                },
-            });
-        }
-        catch (error) {
-            const message = error?.message || error?.response?.data?.message || 'Payment failed. Please try again.';
-            if (!/cancelled/i.test(message)) {
-                Alert.alert('Payment issue', message);
+            const result = await verifyPendingPayment(pending);
+            if (result.ok) {
+                goToPaymentSuccess(plan, backendPlanId, pending.razorpay_order_id, pending.razorpay_payment_id);
+                return;
+            }
+
+            const paymentRef = pending.razorpay_payment_id || pending.razorpay_order_id;
+            if (result.permanent) {
+                Alert.alert('Payment issue', `${getApiErrorText(result.error, 'Payment verification failed.')} If you were charged, please contact ${SUPPORT_EMAIL} with payment id ${paymentRef}.`);
+            }
+            else {
+                Alert.alert('Payment received', `Your payment was received but your plan could not be activated yet (the server did not respond). We will keep trying automatically, so please reopen the app in a few minutes. If it is still not active, contact ${SUPPORT_EMAIL} with payment id ${paymentRef}. Do not pay again.`);
             }
         }
+        catch (error) {
+            Alert.alert('Payment issue', getApiErrorText(error, 'Payment failed. Please try again.'));
+        }
         finally {
+            processingRef.current = false;
             setIsProcessingPlan('');
+            setProcessingStage('');
         }
     };
     return (<Screen>
@@ -188,13 +336,23 @@ export default function SubscriptionScreen() {
       {isLoading ? (<View className="flex-1 items-center justify-center gap-3">
           <ActivityIndicator size="large" color={palette.primary}/>
           <Text className={`text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Loading plans...</Text>
+        </View>) : loadError ? (<View className={`items-center gap-3 rounded-[22px] border p-6 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`}>
+          <Ionicons name="cloud-offline-outline" size={28} color={palette.primary}/>
+          <Text className={`text-center text-[14px] leading-5 ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{loadError}</Text>
+          <AnimatedPressable className="rounded-[14px] bg-brand px-6 py-3" onPress={() => void loadPlans()}>
+            <Text className="text-center text-[14px] font-extrabold text-white">Retry</Text>
+          </AnimatedPressable>
         </View>) : (<View className="gap-[14px] ">
         {plans.map((plan) => {
           const currentPlan = isCurrentPlan(plan);
           const allowRetake = currentPlan && hasAssessmentModule(plan);
-          const buttonDisabled = Boolean(isProcessingPlan);
+          // Renewing an active non-assessment plan early would charge in full and start a new period from
+          // today (remaining days lost), so it is offered again only once the current period has ended.
+          const renewBlocked = currentPlan && !allowRetake;
+          const currentExpiry = currentPlan ? getCurrentPlanExpiry(plan) : '';
+          const buttonDisabled = Boolean(isProcessingPlan) || renewBlocked;
           const buttonLabel = currentPlan
-            ? (allowRetake ? 'Buy Retake / Subscribe Again' : 'Renew / Subscribe Again')
+            ? (allowRetake ? 'Buy Retake / Subscribe Again' : (currentExpiry ? `Current Plan - active until ${currentExpiry}` : 'Current Plan'))
             : 'Choose Plan';
           const statusLabel = currentPlan && allowRetake && isAssessmentLockedOrCompleted ? 'Assessment Completed' : '';
           const statusTone = '#ea872e';
@@ -212,7 +370,7 @@ export default function SubscriptionScreen() {
              <View className="flex-1 gap-1.5">
                   <View className="gap-1">
               <Text className="text-[28px] font-black text-brand">{plan.price}</Text>
-              {plan.validity ? <Text className={`text-[12px] font-bold ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{plan.validity}/month</Text> : null}
+              {plan.validity ? <Text className={`text-[12px] font-bold ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Valid for {plan.validity}</Text> : null}
             </View>
                 {plan.descriptionHtml ? (
                     <RenderHTML
@@ -255,10 +413,10 @@ export default function SubscriptionScreen() {
               className="mt-1 rounded-[14px] py-3"
               onPress={() => void handleSelectPlan(plan)}
               disabled={buttonDisabled}
-              style={{ backgroundColor: palette.primary }}
+              style={{ backgroundColor: palette.primary, opacity: renewBlocked ? 0.6 : 1 }}
             >
               <Text className="text-center text-[14px] font-extrabold" style={{ color: '#fff' }}>
-                {isProcessingPlan === plan.id ? 'Processing...' : buttonLabel}
+                {isProcessingPlan === plan.id ? (processingStage === 'verifying' ? 'Payment received, activating...' : 'Processing...') : buttonLabel}
               </Text>
             </AnimatedPressable>
           </View>);
@@ -287,7 +445,7 @@ export default function SubscriptionScreen() {
                         <Text className="rounded-full bg-brand px-1.5 py-0.5 text-[9px] font-black text-white">Most Popular</Text>
                       ) : null}
                       <Text className={`w-full text-center text-[10px] font-black uppercase tracking-[1px] leading-3 ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{plan.label}</Text>
-                      <Text className="text-[14px] font-black text-brand">{plan.price}</Text>
+                      {plan.price ? <Text className="text-[14px] font-black text-brand">{plan.price}</Text> : null}
                       {plan.note ? <Text className={`text-center text-[9px] italic leading-3 ${preferences.darkMode ? 'text-[#8f8f8f]' : 'text-muted'}`}>{plan.note}</Text> : null}
                     </View>
                   </View>

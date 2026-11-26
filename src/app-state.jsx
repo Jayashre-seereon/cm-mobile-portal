@@ -1,6 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { notifications as notificationItems } from './careermap-data';
 import { ensureAccessToken } from './api/axios';
+import { flushPendingPayments, getPendingPayments } from './subscription-flow-pending';
 import { getNotifications, markNotificationsRead } from './api/notificationApi';
 import { getMentorBookings, getSubscriptions, getTestHistory } from './api/profile';
 import { useAuthStore } from './store/auth-store';
@@ -211,6 +212,35 @@ function getPlanIdFromSubscription(item) {
     return '';
 }
 
+// Feature keys used by isUnlocked()/canAccessFreeDetail(), matched against the module titles of the
+// backend plan behind each active subscription (subscriptions include plan.modules).
+const moduleFeatureMatchers = [
+    ['psychometric-test', /psychometric|assessment/],
+    ['book-mentor', /mentor|counsel/],
+    ['master-class', /master\s*class|personality video|career video/],
+    ['scholarship', /scholarship/],
+    ['career-library', /career\s*(library|archive)|infocentre|info centre/],
+    ['abroad-consultancy', /abroad/],
+    ['newsletter', /newsletter/],
+];
+
+function resolveActiveFeatures(activeItems = []) {
+    const features = new Set();
+    for (const item of activeItems) {
+        const nameKey = getPlanIdFromSubscription(item);
+        for (const feature of planFeatures[nameKey] || []) features.add(feature);
+        const modules = Array.isArray(item?.plan?.modules) ? item.plan.modules : [];
+        for (const module of modules) {
+            const title = String(typeof module === 'string' ? module : module?.title || '').toLowerCase();
+            if (!title) continue;
+            for (const [feature, pattern] of moduleFeatureMatchers) {
+                if (pattern.test(title)) features.add(feature);
+            }
+        }
+    }
+    return [...features];
+}
+
 function normalizeTestHistoryItems(items = []) {
     return items.map((item, index) => {
         const mapped = mapTestHistoryItem(item, index);
@@ -294,6 +324,8 @@ export function AppStateProvider({ children }) {
     const [subscriptionRecords, setSubscriptionRecords] = useState([]);
     const [freeAccessUsage, setFreeAccessUsageState] = useState(initialFreeAccessUsage);
     const [activeSubscriptionPlanIds, setActiveSubscriptionPlanIds] = useState([]);
+    const [activeFeatures, setActiveFeatures] = useState([]);
+    const loadedUserIdRef = useRef('');
     const accessToken = useAuthStore((state) => state.accessToken);
     const refreshToken = useAuthStore((state) => state.refreshToken);
     const hasAuthenticatedSession = useAuthStore((state) => state.hasAuthenticatedSession);
@@ -350,11 +382,56 @@ export function AppStateProvider({ children }) {
         return undefined;
     }, [accessToken, hasAuthenticatedSession, refreshNotifications]);
 
+    const hasAccessToken = Boolean(accessToken);
+    const sessionUserId = String(user?.id ?? user?._id ?? '');
+
+    // Applies a fresh subscriptions response. Stable identity (only state setters / store reads),
+    // so screens can safely list it in effect deps without re-fetching in a loop.
+    const applySubscriptionItems = useCallback((items, userId) => {
+        const userItems = items.filter((item) => {
+            const itemUserId = item?.userId ?? item?.user_id ?? item?.user?.id ?? item?.user?._id;
+            return !itemUserId || !userId || String(itemUserId) === userId;
+        });
+        const activeItems = userItems.filter((item) => String(item?.status || '').toLowerCase() === 'active');
+        const ids = resolveActiveSubscriptionPlanIds(activeItems.map((item) => ({
+            ...item,
+            backendPlanId: item?.planId ?? item?.plan_id ?? item?.plan?.id ?? item?.plan?.planId ?? item?.plan?.plan_id ?? '',
+        })));
+        if (!ids.length && activeItems.length) {
+            for (const item of activeItems) {
+                const nameId = getPlanIdFromSubscription(item);
+                if (nameId && !ids.includes(nameId)) ids.push(nameId);
+            }
+        }
+        const normalized = normalizeSubscriptionItems(userItems);
+        setSubscriptionRecords(normalized);
+        setActiveSubscriptionPlanIds(ids);
+        setActiveFeatures(resolveActiveFeatures(activeItems));
+        setActivePlanIdState(ids[0] || null);
+        return normalized;
+    }, []);
+
+    // Throws when the request fails (callers decide how to report it); the previous data is kept.
+    const refreshSubscriptionData = useCallback(async () => {
+        const authAtStart = useAuthStore.getState();
+        if (!authAtStart.accessToken) return null;
+        const userIdAtStart = String(authAtStart.user?.id ?? authAtStart.user?._id ?? '');
+        const response = await getSubscriptions();
+        const authNow = useAuthStore.getState();
+        const userIdNow = String(authNow.user?.id ?? authNow.user?._id ?? '');
+        if (!authNow.accessToken || userIdNow !== userIdAtStart) return null;
+        return applySubscriptionItems(extractResponseItems(response), userIdAtStart);
+    }, [applySubscriptionItems]);
+
+    // Keyed on the signed-in user, not on the raw access token: the 15-minute token refresh must not
+    // wipe the plan/test/booking data (paid users would briefly look unsubscribed).
     useEffect(() => {
-        if (!accessToken || !hasAuthenticatedSession) {
+        if (!hasAccessToken || !hasAuthenticatedSession) {
+            loadedUserIdRef.current = '';
             clearPersistedAppState();
             setActivePlanIdState(null);
             setActiveSubscriptionPlanIds([]);
+            setActiveFeatures([]);
             setSubscriptionRecords([]);
             setTestHistory(initialTestHistory);
             setBookings(initialBookings);
@@ -368,81 +445,71 @@ export function AppStateProvider({ children }) {
         }
 
         let isMounted = true;
-        const requestUserId = String(user?.id ?? user?._id ?? '');
-        setActivePlanIdState(null);
-        setActiveSubscriptionPlanIds([]);
-        setSubscriptionRecords([]);
-        setTestHistory(initialTestHistory);
-        setBookings(initialBookings);
+        const requestUserId = sessionUserId;
+        if (loadedUserIdRef.current !== requestUserId) {
+            // A different account: never show the previous user's data while loading.
+            setActivePlanIdState(null);
+            setActiveSubscriptionPlanIds([]);
+            setActiveFeatures([]);
+            setSubscriptionRecords([]);
+            setTestHistory(initialTestHistory);
+            setBookings(initialBookings);
+        }
+
+        const isStillCurrentUser = () => {
+            const currentAuth = useAuthStore.getState();
+            const currentUserId = String(currentAuth.user?.id ?? currentAuth.user?._id ?? '');
+            return Boolean(currentAuth.accessToken) && currentUserId === requestUserId;
+        };
 
         async function loadProfileSections() {
-            try {
-                const [testResponse, bookingResponse, subscriptionResponse, dashboardResponse] = await Promise.all([
-                    getTestHistory().catch(() => null),
-                    getMentorBookings().catch(() => null),
-                    getSubscriptions().catch(() => null),
-                    import('./api/authApi').then(({ getUserDashboard }) => getUserDashboard().catch(() => null)),
-                ]);
+            const [testResponse, bookingResponse, subscriptionResponse, dashboardResponse] = await Promise.all([
+                getTestHistory().catch(() => null),
+                getMentorBookings().catch(() => null),
+                getSubscriptions().catch(() => null),
+                import('./api/authApi').then(({ getUserDashboard }) => getUserDashboard().catch(() => null)).catch(() => null),
+            ]);
 
-                if (!isMounted) {
-                    return;
-                }
+            if (!isMounted || !isStillCurrentUser()) return;
+            loadedUserIdRef.current = requestUserId;
 
-                const currentAuth = useAuthStore.getState();
-                const currentUserId = String(currentAuth.user?.id ?? currentAuth.user?._id ?? '');
-                if (currentAuth.accessToken !== accessToken || currentUserId !== requestUserId) return;
-
-                const testItems = extractResponseItems(testResponse);
-                const bookingItems = extractResponseItems(bookingResponse);
-                const subscriptionItems = extractResponseItems(subscriptionResponse);
-
-                const userSubscriptionItems = subscriptionItems.filter((item) => {
-                    const itemUserId = item?.userId ?? item?.user_id ?? item?.user?.id ?? item?.user?._id;
-                    return !itemUserId || !currentUserId || String(itemUserId) === currentUserId;
-                });
-                const dashboardUser = extractDashboardUser(dashboardResponse);
-                if (dashboardUser) {
-                    // Load the saved name/email/... from the server record (mapped to profile fields),
-                    // so the profile never depends on a stale or empty local copy.
-                    setUserProfile((current) => mergeServerProfile(current, mapApiUserToProfile(dashboardUser)));
-                }
-
-                setTestHistory(normalizeTestHistoryItems(testItems));
-                setBookings(bookingItems.length > 0 ? normalizeBookingItems(bookingItems) : initialBookings);
-
-                const activeSubscriptions = userSubscriptionItems.filter((item) => String(item?.status || '').toLowerCase() === 'active');
-                const normalizedSubscriptions = normalizeSubscriptionItems(userSubscriptionItems);
-                const planIds = resolveActiveSubscriptionPlanIds(activeSubscriptions.map((item) => ({
-                    ...item,
-                    backendPlanId: item?.planId ?? item?.plan_id ?? item?.plan?.id ?? item?.plan?.planId ?? item?.plan?.plan_id ?? '',
-                })));
-                if (!planIds.length && activeSubscriptions.length) {
-                    for (const item of activeSubscriptions) {
-                        const nameId = getPlanIdFromSubscription(item);
-                        if (nameId && !planIds.includes(nameId)) planIds.push(nameId);
-                    }
-                }
-                setSubscriptionRecords(normalizedSubscriptions);
-                setActiveSubscriptionPlanIds(planIds);
-                setActivePlanIdState(planIds[0] || null);
+            const dashboardUser = extractDashboardUser(dashboardResponse);
+            if (dashboardUser) {
+                // Load the saved name/email/... from the server record (mapped to profile fields),
+                // so the profile never depends on a stale or empty local copy.
+                setUserProfile((current) => mergeServerProfile(current, mapApiUserToProfile(dashboardUser)));
             }
-            catch {
-                if (isMounted) {
-                    setTestHistory([]);
-                    setBookings(initialBookings);
-                    setActivePlanIdState(null);
-                    setActiveSubscriptionPlanIds([]);
-                    setSubscriptionRecords([]);
+
+            // A failed request keeps whatever was already loaded instead of clearing it.
+            if (testResponse !== null) {
+                setTestHistory(normalizeTestHistoryItems(extractResponseItems(testResponse)));
+            }
+            if (bookingResponse !== null) {
+                const bookingItems = extractResponseItems(bookingResponse);
+                setBookings(bookingItems.length > 0 ? normalizeBookingItems(bookingItems) : initialBookings);
+            }
+            if (subscriptionResponse !== null) {
+                applySubscriptionItems(extractResponseItems(subscriptionResponse), requestUserId);
+            }
+
+            // Subscription payments captured by Razorpay but not yet verified (timeout, app closed...)
+            // are verified again here; a success reloads the subscriptions.
+            if (getPendingPayments(requestUserId).length > 0) {
+                const { activated } = await flushPendingPayments(requestUserId).catch(() => ({ activated: 0 }));
+                if (activated > 0 && isMounted && isStillCurrentUser()) {
+                    await refreshSubscriptionData().catch(() => null);
                 }
             }
         }
 
-        loadProfileSections();
+        void loadProfileSections().catch(() => {
+            // Keep the previously loaded data on unexpected failures.
+        });
 
         return () => {
             isMounted = false;
         };
-    }, [accessToken, hasAuthenticatedSession, user?.id, user?._id]);
+    }, [hasAccessToken, hasAuthenticatedSession, sessionUserId, applySubscriptionItems, refreshSubscriptionData]);
 
     const value = useMemo(() => ({
         activePlanId,
@@ -479,52 +546,21 @@ export function AppStateProvider({ children }) {
                 candidateNames.some((name) => activeSubscriptionPlanIds.some((id) => String(id).trim().toLowerCase() === name));
         },
         onboarding,
-       isUnlocked: (feature) => {
-            if (!activePlanId)
-                return false;
-            return (planFeatures[activePlanId] || []).includes(feature);
-        },
+       isUnlocked: (feature) => activeFeatures.includes(feature),
         activatePlan: (planId) => {
             // Active plan status comes only from the authenticated subscriptions API.
             // Payment completion triggers a fresh profile/subscription load.
         },
-        refreshSubscriptionData: async () => {
-            const tokenAtStart = useAuthStore.getState().accessToken;
-            const userAtStart = useAuthStore.getState().user;
-            if (!tokenAtStart) return;
-            const userIdAtStart = String(userAtStart?.id ?? userAtStart?._id ?? '');
-            const response = await getSubscriptions();
-            const authNow = useAuthStore.getState();
-            const userIdNow = String(authNow.user?.id ?? authNow.user?._id ?? '');
-            if (authNow.accessToken !== tokenAtStart || userIdNow !== userIdAtStart) return;
-            const items = extractResponseItems(response).filter((item) => {
-                const itemUserId = item?.userId ?? item?.user_id ?? item?.user?.id ?? item?.user?._id;
-                return !itemUserId || !userIdAtStart || String(itemUserId) === userIdAtStart;
-            });
-            const activeItems = items.filter((item) => String(item?.status || '').toLowerCase() === 'active');
-            const ids = resolveActiveSubscriptionPlanIds(activeItems.map((item) => ({
-                ...item,
-                backendPlanId: item?.planId ?? item?.plan_id ?? item?.plan?.id ?? item?.plan?.planId ?? item?.plan?.plan_id ?? '',
-            })));
-            if (!ids.length && activeItems.length) {
-                for (const item of activeItems) {
-                    const nameId = getPlanIdFromSubscription(item);
-                    if (nameId && !ids.includes(nameId)) ids.push(nameId);
-                }
-            }
-            setSubscriptionRecords(normalizeSubscriptionItems(items));
-            setActiveSubscriptionPlanIds(ids);
-            setActivePlanIdState(ids[0] || null);
-        },
+        refreshSubscriptionData,
         canAccessFreeDetail: (feature, itemKey) => {
-            if (activePlanId && planFeatures[activePlanId]?.includes(feature)) {
+            if (activeFeatures.includes(feature)) {
                 return true;
             }
             const firstViewedItem = freeAccessUsage[feature];
             return firstViewedItem === null || firstViewedItem === itemKey;
         },
         registerFreeDetailAccess: (feature, itemKey) => setFreeAccessUsageState((current) => {
-            if (activePlanId && planFeatures[activePlanId]?.includes(feature)) {
+            if (activeFeatures.includes(feature)) {
                 return current;
             }
             if (current[feature] !== null) {
@@ -588,7 +624,7 @@ export function AppStateProvider({ children }) {
         unreadNotificationsCount: notifications.filter((item) => item.unread).length,
         notificationsLoadFailed,
         freeAccessUsage,
-  }), [activePlanId, activeSubscriptionPlanIds, bookings, freeAccessUsage, notifications, notificationsLoadFailed, onboarding, preferences, profileEditRequestKey, promoMessage, refreshNotifications, markNotificationsAsRead, savedCareers, subscriptionRecords, testHistory, userProfile]);
+  }), [activePlanId, activeFeatures, activeSubscriptionPlanIds, bookings, refreshSubscriptionData, freeAccessUsage, notifications, notificationsLoadFailed, onboarding, preferences, profileEditRequestKey, promoMessage, refreshNotifications, markNotificationsAsRead, savedCareers, subscriptionRecords, testHistory, userProfile]);
     return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;
 }
 export function useAppState() {

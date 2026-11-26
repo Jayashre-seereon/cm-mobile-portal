@@ -125,8 +125,9 @@ export async function getMyAttempts() {
     if (data?.data && Array.isArray(data.data)) return data.data;
     return [];
   } catch (error) {
+    // Rethrow so callers can tell "no attempts" apart from "history failed to load".
     console.warn("getMyAttempts error:", error?.message);
-    return [];
+    throw error;
   }
 }
 
@@ -141,11 +142,19 @@ export async function getMyAttempts() {
 export async function getAssessmentAccessStatus() {
   try {
     const response = await api.get("/psychometric-assessment/assessment/user/access-status");
-    return extractData(response);
+    const status = extractData(response);
+    if (!status || typeof status !== "object" || typeof status.allowed !== "boolean") {
+      throw new Error("Could not verify assessment access.");
+    }
+    return status;
   } catch (error) {
     console.warn("getAssessmentAccessStatus error:", error?.message);
+    // Only treat an error body as an access status when it really is one
+    // (e.g. 403 { allowed: false, reason }). Plain { success:false, message }
+    // error bodies must not be mistaken for "access allowed".
     const data = error.response?.data;
-    if (data) return extractData(data);
+    const status = data ? extractData(data) : null;
+    if (status && typeof status === "object" && typeof status.allowed === "boolean") return status;
     throw error;
   }
 }

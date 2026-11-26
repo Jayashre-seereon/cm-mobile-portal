@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -22,10 +22,14 @@ import {
   startAssessmentAttempt,
 } from '../../../src/api/psychometricAssessmentApi';
 import {
+  APTITUDE_TIME_LIMIT_MINUTES,
   ASSESSMENT_DOMAINS,
   ESTIMATED_DURATION_MINS,
   TOTAL_ASSESSMENT_QUESTIONS,
 } from '../../../src/features/assessment/data/assessmentConstants';
+
+const APTITUDE_DOMAIN = ASSESSMENT_DOMAINS.find((d) => d.type === 'mcq') || null;
+const APTITUDE_SECTION_NO = APTITUDE_DOMAIN ? ASSESSMENT_DOMAINS.indexOf(APTITUDE_DOMAIN) + 1 : ASSESSMENT_DOMAINS.length;
 
 export default function AssessmentLandingScreen() {
   const { preferences } = useAppState();
@@ -41,6 +45,10 @@ export default function AssessmentLandingScreen() {
   const [showRetakeModal, setShowRetakeModal] = useState(false);
   const [showPlanRequiredModal, setShowPlanRequiredModal] = useState(false);
   const [planRequiredMessage, setPlanRequiredMessage] = useState('');
+  const [historyError, setHistoryError] = useState(false);
+  // Synchronous guard so a double tap cannot start two attempts before
+  // the `starting` state re-renders.
+  const startingRef = useRef(false);
 
   const loadData = useCallback(async () => {
     try {
@@ -50,11 +58,19 @@ export default function AssessmentLandingScreen() {
         getMyAttempts(),
       ]);
 
-      if (accessRes.status === 'fulfilled' && accessRes.value) {
+      // Only a response with a boolean `allowed` is a verified access status;
+      // anything else is treated as "could not verify".
+      if (
+        accessRes.status === 'fulfilled' &&
+        accessRes.value &&
+        typeof accessRes.value.allowed === 'boolean'
+      ) {
         setAccessStatus(accessRes.value);
       } else {
         setAccessStatus(null);
       }
+
+      setHistoryError(attemptsRes.status === 'rejected');
 
       const assessments =
         assessmentsRes.status === 'fulfilled' && Array.isArray(assessmentsRes.value)
@@ -118,6 +134,7 @@ export default function AssessmentLandingScreen() {
   // Always starts a FRESH attempt (backend creates a new attempt every time);
   // unfinished attempts are never resumed.
   async function handleStartTest() {
+    if (startingRef.current) return;
     // If accessStatus specifically marks user as blocked:
     if (accessStatus && accessStatus.allowed === false) {
       if (accessStatus.reason === 'ALREADY_COMPLETED') {
@@ -141,6 +158,7 @@ export default function AssessmentLandingScreen() {
       return;
     }
 
+    startingRef.current = true;
     try {
       setStarting(true);
       const defaultAssessment = publishedAssessments[0] || {};
@@ -188,6 +206,7 @@ export default function AssessmentLandingScreen() {
         );
       }
     } finally {
+      startingRef.current = false;
       setStarting(false);
     }
   }
@@ -233,6 +252,10 @@ export default function AssessmentLandingScreen() {
   const isNoActivePlan = accessStatus
     ? accessStatus.allowed === false && accessStatus.reason === 'NO_ACTIVE_PLAN'
     : false;
+
+  // Access could not be verified (network/server error) and there is no
+  // completed attempt to fall back on: never show the "unlocked" state.
+  const isAccessUnverified = !accessStatus && !isAlreadyCompleted;
 
   const completedAttemptId =
     accessStatus?.completedAttemptId ||
@@ -363,7 +386,7 @@ export default function AssessmentLandingScreen() {
             >
               <Ionicons name="trophy-outline" size={13} color="#fde047" />
               <Text style={{ color: '#ffffff', fontSize: 11, fontFamily: 'Poppins_700Bold', fontWeight: '700' }}>
-                6 Domains · 18 Clusters
+                {ASSESSMENT_DOMAINS.length} Sections · 18 Clusters
               </Text>
             </View>
           </View>
@@ -463,6 +486,45 @@ export default function AssessmentLandingScreen() {
                   </TouchableOpacity>
                 </View>
               </View>
+            ) : isAccessUnverified ? (
+              /* Access check failed: ask the user to retry instead of unlocking */
+              <View style={{ alignItems: 'center', paddingVertical: 6 }}>
+                <Ionicons name="cloud-offline-outline" size={30} color="#fde047" />
+                <Text
+                  style={{
+                    color: '#ffffff',
+                    fontSize: 16,
+                    fontFamily: 'Poppins_800ExtraBold', fontWeight: '800',
+                    marginTop: 6,
+                    textAlign: 'center',
+                  }}
+                >
+                  Unable to Verify Access
+                </Text>
+                <Text style={{ color: '#ffe4e6', fontSize: 12, marginTop: 3, textAlign: 'center', lineHeight: 17 }}>
+                  We could not check your assessment access right now. Please check your connection and try again.
+                </Text>
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() => {
+                    setLoading(true);
+                    loadData();
+                  }}
+                  style={{
+                    backgroundColor: '#facc15',
+                    borderRadius: 14,
+                    paddingVertical: 12,
+                    paddingHorizontal: 24,
+                    width: '100%',
+                    alignItems: 'center',
+                    marginTop: 14,
+                  }}
+                >
+                  <Text style={{ color: '#1e293b', fontSize: 14, fontFamily: 'Poppins_900Black', fontWeight: '900' }}>
+                    Retry
+                  </Text>
+                </TouchableOpacity>
+              </View>
             ) : isNoActivePlan ? (
               /* STATE 3: No Active Plan (Locked) */
               <View>
@@ -553,7 +615,7 @@ export default function AssessmentLandingScreen() {
                     textAlign: 'center',
                   }}
                 >
-                  Takes ~35-45 mins. Your answers auto-save at every step.
+                  Takes ~{ESTIMATED_DURATION_MINS} mins. Complete it in one sitting.
                 </Text>
 
                 <TouchableOpacity
@@ -633,7 +695,7 @@ export default function AssessmentLandingScreen() {
                     }}
                   >
                     <Text style={{ color: darkMode ? '#cbd5e1' : '#475569', fontSize: 10, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>
-                      Section {index + 1} / 6
+                      Section {index + 1} / {ASSESSMENT_DOMAINS.length}
                     </Text>
                   </View>
                 </View>
@@ -715,10 +777,10 @@ export default function AssessmentLandingScreen() {
               }}
             >
               <Text style={{ color: textColor, fontSize: 13, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>
-                2. Auto-Saved Progress
+                2. Complete in One Sitting
               </Text>
               <Text style={{ color: subtextColor, fontSize: 11, lineHeight: 16, marginTop: 3 }}>
-                Every response is automatically saved. You can safely close or pause and resume anytime.
+                Complete the test in one sitting. Leaving the test or closing the app will discard this attempt.
               </Text>
             </View>
 
@@ -735,7 +797,7 @@ export default function AssessmentLandingScreen() {
                 3. Aptitude Reasoning
               </Text>
               <Text style={{ color: subtextColor, fontSize: 11, lineHeight: 16, marginTop: 3 }}>
-                Section 7 features 39 multiple choice questions with a 15-minute time limit. Keep scrap paper handy for quick calculations.
+                Section {APTITUDE_SECTION_NO} features {APTITUDE_DOMAIN?.questionCount ?? 50} multiple choice questions with a {APTITUDE_TIME_LIMIT_MINUTES}-minute time limit. Keep scrap paper handy for quick calculations.
               </Text>
             </View>
 
@@ -803,6 +865,7 @@ export default function AssessmentLandingScreen() {
               <TouchableOpacity
                 activeOpacity={0.8}
                 onPress={handleRetakeConfirm}
+                disabled={starting}
                 style={{
                   backgroundColor: isAllowed ? '#9a2119' : 'transparent',
                   borderWidth: isAllowed ? 0 : 1,
@@ -836,6 +899,50 @@ export default function AssessmentLandingScreen() {
                 Loading your history...
               </Text>
             </View>
+          ) : historyError ? (
+            <View style={{ alignItems: 'center', paddingVertical: 20 }}>
+              <Ionicons name="cloud-offline-outline" size={30} color="#9a2119" />
+              <Text
+                style={{
+                  color: textColor,
+                  fontSize: 14,
+                  fontFamily: 'Poppins_700Bold', fontWeight: '700',
+                  marginTop: 8,
+                  textAlign: 'center',
+                }}
+              >
+                Could not load your history.
+              </Text>
+              <Text
+                style={{
+                  color: subtextColor,
+                  fontSize: 11,
+                  marginTop: 2,
+                  textAlign: 'center',
+                  maxWidth: 260,
+                }}
+              >
+                Your past reports are safe. Pull down to refresh or tap Retry.
+              </Text>
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => {
+                  setLoading(true);
+                  loadData();
+                }}
+                style={{
+                  backgroundColor: '#9a2119',
+                  borderRadius: 12,
+                  paddingVertical: 10,
+                  paddingHorizontal: 20,
+                  marginTop: 14,
+                }}
+              >
+                <Text style={{ color: '#ffffff', fontSize: 12, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>
+                  Retry
+                </Text>
+              </TouchableOpacity>
+            </View>
           ) : myAttempts.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 20 }}>
               <Text style={{ fontSize: 32 }}>📋</Text>
@@ -865,17 +972,23 @@ export default function AssessmentLandingScreen() {
               <TouchableOpacity
                 activeOpacity={0.85}
                 onPress={() => handleStartTest()}
+                disabled={starting}
                 style={{
                   backgroundColor: '#9a2119',
                   borderRadius: 12,
                   paddingVertical: 10,
                   paddingHorizontal: 20,
                   marginTop: 14,
+                  opacity: starting ? 0.7 : 1,
                 }}
               >
-                <Text style={{ color: '#ffffff', fontSize: 12, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>
-                  {isNoActivePlan ? '🔒 Unlock Assessment Plan' : '🚀 Start Your First Assessment'}
-                </Text>
+                {starting ? (
+                  <ActivityIndicator color="#ffffff" size="small" />
+                ) : (
+                  <Text style={{ color: '#ffffff', fontSize: 12, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>
+                    {isNoActivePlan ? '🔒 Unlock Assessment Plan' : '🚀 Start Your First Assessment'}
+                  </Text>
+                )}
               </TouchableOpacity>
             </View>
           ) : (
@@ -1123,6 +1236,7 @@ export default function AssessmentLandingScreen() {
                 <Text style={{ color: subtextColor, fontFamily: 'Poppins_700Bold', fontWeight: '700' }}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
+                disabled={starting}
                 onPress={() => {
                   setShowRetakeModal(false);
                   handleStartTest();
