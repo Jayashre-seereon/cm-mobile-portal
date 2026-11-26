@@ -193,6 +193,37 @@ const MODULE_GATES = {
 
 let modulesCache = { at: 0, items: null };
 
+// Module access checks (POST /module-access/check is read-only), started as soon as search
+// results show so a tap doesn't wait for one. Older than 15 s -> asked again; failures aren't kept.
+const ACCESS_CHECK_TTL_MS = 15000;
+const accessCheckCache = new Map();
+function checkModuleAccessFresh(moduleId) {
+  const key = String(moduleId);
+  const cached = accessCheckCache.get(key);
+  if (cached && Date.now() - cached.at < ACCESS_CHECK_TTL_MS) return cached.promise;
+  const promise = checkModuleAccess(moduleId);
+  accessCheckCache.set(key, { at: Date.now(), promise });
+  promise.catch(() => {
+    if (accessCheckCache.get(key)?.promise === promise) accessCheckCache.delete(key);
+  });
+  return promise;
+}
+
+/** Warm the access checks for the modules these search results open. */
+export function prefetchSearchAccess(items = []) {
+  const gates = new Map();
+  items.forEach((item) => {
+    const pathname = resolveSearchTarget(item)?.pathname;
+    const gate = pathname ? MODULE_GATES[pathname] : null;
+    if (gate) gates.set(pathname, gate);
+  });
+  gates.forEach((gate) => {
+    findModuleId(gate.matchers)
+      .then((moduleId) => (Number.isFinite(moduleId) ? checkModuleAccessFresh(moduleId) : null))
+      .catch(() => {});
+  });
+}
+
 async function findModuleId(matchers) {
   if (!modulesCache.items || Date.now() - modulesCache.at > 60000) {
     modulesCache = { at: Date.now(), items: await getModules() };
@@ -393,7 +424,7 @@ export async function openTarget(target, { onLocked, fromGlobalSearch = false, s
   }
 
   try {
-    const response = await checkModuleAccess(moduleId);
+    const response = await checkModuleAccessFresh(moduleId);
     if (!response?.allowed) {
       onLocked?.({
         title: MODULE_LOCKED_HEADING,

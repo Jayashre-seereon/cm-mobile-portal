@@ -20,6 +20,7 @@ import {
     loadDashboardModulesByRoute,
     normalizeAccessStatus,
     openTarget,
+    prefetchSearchAccess,
     resolveSearchTarget,
 } from './utils/searchNavigation';
 
@@ -410,6 +411,11 @@ export function GlobalSearch({ visible, onClose }) {
             setActiveTab('all');
         }
     }, [activeTab, visibleTabs]);
+
+    // Check module access for the results now, so tapping one opens it without waiting.
+    useEffect(() => {
+        if (data.results.length) prefetchSearchAccess(data.results);
+    }, [data.results]);
 
     const resultCount = sections.reduce((sum, section) => sum + section.items.length, 0);
 

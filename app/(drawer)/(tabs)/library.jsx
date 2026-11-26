@@ -2,7 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import RenderHTML from 'react-native-render-html';import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCareerLibraryCategoriesByStream, getCareerLibraryDetails, getCareerLibraryNext, getCareerLibraryStreams, startCareerLibraryPreview } from '../../../src/api/careerLibraryApi';
 import { getCareerLibraryInstitutions, getInstituteFilters } from '../../../src/api/instituteApi';
@@ -996,7 +996,19 @@ export default function CareerLibraryScreen() {
         // unlock sheet. In preview the server only starts a preview for categories marked free, so
         // anything under a locked category (2nd category, specialization, career detail) opens the
         // unlock sheet instead of a page.
-        const access = Number.isFinite(resolvedModuleId) ? await checkModuleAccess(resolvedModuleId).catch(() => null) : null;
+        // openTarget (global search) checked access just before navigating and passed the result,
+        // so reuse it instead of a second round trip (the server still enforces every request).
+        const passedStatus = String(params.accessStatus || '').toLowerCase();
+        // searchKey is the navigation time, so only a check made moments ago is reused.
+        const searchAge = Date.now() - Number(params.searchKey);
+        const freshSearchAccess = params.fromGlobalSearch === '1'
+            && Number.isFinite(searchAge) && searchAge >= 0 && searchAge < 30000
+            && ['unlocked', 'preview'].includes(passedStatus)
+            && Number.isFinite(resolvedModuleId)
+            && String(params.moduleId) === String(resolvedModuleId);
+        const access = freshSearchAccess
+            ? { allowed: true, mode: passedStatus === 'unlocked' ? 'full' : 'preview' }
+            : Number.isFinite(resolvedModuleId) ? await checkModuleAccess(resolvedModuleId).catch(() => null) : null;
         if (access && access.allowed === false) {
             setModuleStatus('locked');
             setHasFullAccess(false);
@@ -1019,25 +1031,30 @@ export default function CareerLibraryScreen() {
         };
         const sameId = (a, b) => a !== undefined && a !== null && b !== undefined && b !== null && String(a) === String(b);
         const listOf = (response) => (Array.isArray(response?.data) ? response.data : []);
-        const findCategory = async (categoryId, streamIdHint) => {
-            const streamIds = [streamIdHint, ...streamItems.map((stream) => stream?.id)]
-                .filter((value, index, all) => value !== undefined && value !== null && value !== '' && all.findIndex((other) => String(other) === String(value)) === index);
-            for (const streamId of streamIds) {
-                try {
-                    const items = listOf(await getCareerLibraryCategoriesByStream(streamId, resolvedModuleId));
-                    const category = items.find((item) => sameId(item?.id, categoryId));
-                    if (category) {
-                        const stream = streamItems.find((item) => sameId(item?.id, streamId)) || { id: Number(streamId), name: '' };
-                        setSelectedStream(stream);
-                        setCategories(items);
-                        return category;
-                    }
-                }
-                catch {
-                    // try the next stream
-                }
+        const findInStream = async (streamId, categoryId) => {
+            try {
+                const items = listOf(await getCareerLibraryCategoriesByStream(streamId, resolvedModuleId));
+                const category = items.find((item) => sameId(item?.id, categoryId));
+                return category ? { streamId, items, category } : null;
             }
-            return null;
+            catch {
+                return null;
+            }
+        };
+        const findCategory = async (categoryId, streamIdHint) => {
+            const hasHint = streamIdHint !== undefined && streamIdHint !== null && streamIdHint !== '';
+            let hit = hasHint ? await findInStream(streamIdHint, categoryId) : null;
+            if (!hit) {
+                // No (or wrong) hint: ask every stream at once instead of one after another.
+                const others = streamItems.map((stream) => stream?.id)
+                    .filter((value) => value !== undefined && value !== null && value !== '' && !sameId(value, streamIdHint));
+                hit = (await Promise.all(others.map((streamId) => findInStream(streamId, categoryId)))).find(Boolean) || null;
+            }
+            if (!hit) return null;
+            const stream = streamItems.find((item) => sameId(item?.id, hit.streamId)) || { id: Number(hit.streamId), name: '' };
+            setSelectedStream(stream);
+            setCategories(hit.items);
+            return hit.category;
         };
         const categoryIsFree = (category) => full || ['preview', 'full'].includes(String(category?.accessTier || '').toLowerCase());
         const selectCategory = (category) => {
@@ -1074,22 +1091,20 @@ export default function CareerLibraryScreen() {
             if (inPreview) setIsCategoryFree(true);
             return;
         }
-        const category = params.categoryId ? await findCategory(params.categoryId, params.streamId) : null;
+        // These lookups don't depend on each other, so run them at the same time.
+        const subIdEarly = params.subCategoryId || (type === 'subcategory' ? params.searchId : '');
+        const [category, secondNext, subNext] = await Promise.all([
+            params.categoryId ? findCategory(params.categoryId, params.streamId) : null,
+            params.categoryId && params.secondCategoryId ? getCareerLibraryNext('category', params.categoryId).catch(() => null) : null,
+            type !== 'secondcategory' && subIdEarly && params.secondCategoryId ? getCareerLibraryNext('second', params.secondCategoryId).catch(() => null) : null,
+        ]);
         if (category) {
             selectCategory(category);
         }
         let secondItem = null;
-        if (params.categoryId && params.secondCategoryId) {
-            try {
-                const next = await getCareerLibraryNext('category', params.categoryId);
-                if (next?.type === 'secondcategory') {
-                    setSecondCategories(listOf(next));
-                    secondItem = listOf(next).find((item) => sameId(item?.id, params.secondCategoryId)) || null;
-                }
-            }
-            catch {
-                secondItem = null;
-            }
+        if (secondNext?.type === 'secondcategory') {
+            setSecondCategories(listOf(secondNext));
+            secondItem = listOf(secondNext).find((item) => sameId(item?.id, params.secondCategoryId)) || null;
         }
         if (type === 'secondcategory') {
             const secondId = params.secondCategoryId || params.searchId;
@@ -1116,15 +1131,9 @@ export default function CareerLibraryScreen() {
             if (secondItem) {
                 setSelectedSecondCategory(secondItem);
             }
-            try {
-                const next = await getCareerLibraryNext('second', params.secondCategoryId);
-                if (next?.type === 'subcategory') {
-                    setSubCategories(listOf(next));
-                    subItem = listOf(next).find((item) => sameId(item?.id, subId)) || null;
-                }
-            }
-            catch {
-                subItem = null;
+            if (subNext?.type === 'subcategory') {
+                setSubCategories(listOf(subNext));
+                subItem = listOf(subNext).find((item) => sameId(item?.id, subId)) || null;
             }
         }
         const sub = subItem || { id: Number(subId), title, name: title };
@@ -1140,8 +1149,22 @@ export default function CareerLibraryScreen() {
         await handleClick('sub', subId, sub, { previewId: gated.sessionId });
         if (inPreview) setIsCategoryFree(true);
     };
+    // A search result opens its page directly: until openFromSearch finishes, a loader is shown
+    // instead of the stream list (which used to flash first, then jump to the details).
+    const [searchDoneKey, setSearchDoneKey] = useState(null);
+    const pendingSearchKey = typeof params.searchKey === 'string' ? params.searchKey : '';
+    const searchPending = Boolean(pendingSearchKey) && pendingSearchKey !== searchDoneKey;
+    useEffect(() => {
+        if (!searchPending) return undefined;
+        // Never hide the archive forever if the search can't be applied (e.g. access never resolves).
+        const fallback = setTimeout(() => setSearchDoneKey(pendingSearchKey), 15000);
+        return () => clearTimeout(fallback);
+    }, [searchPending, pendingSearchKey]);
     useSearchDeepLink(params.searchKey, moduleAccessReady && !loading, () => {
-        void openFromSearch();
+        const key = pendingSearchKey;
+        openFromSearch()
+            .catch(() => {})
+            .finally(() => setSearchDoneKey(key));
     });
     const handleBack = () => {
         if (params.fromGlobalSearch === '1' && router.canGoBack()) {
@@ -1522,6 +1545,17 @@ export default function CareerLibraryScreen() {
         }
         return 'Career Archive';
     };
+    if (searchPending && !showUnlockSheet) {
+        return (<Screen scroll={true} animationKey="search-pending">
+          <View className="flex-row items-center">
+            <Text className={`text-[18px] font-extrabold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{typeof params.searchTitle === 'string' && params.searchTitle ? params.searchTitle : 'Career Archive'}</Text>
+          </View>
+          <View className="items-center justify-center py-16 gap-3">
+            <ActivityIndicator size="large" color={palette.primary}/>
+            <Text className={`text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Loading details...</Text>
+          </View>
+        </Screen>);
+    }
     return (<Screen scroll={true} animationKey={animationKey}>
       <View className="flex-row items-center">
         {currentLevel !== 'streams' && (<Pressable onPress={handleBack} className="mr-3 h-10 w-10 items-center justify-center rounded-full">
