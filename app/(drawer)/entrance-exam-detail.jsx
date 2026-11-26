@@ -1,16 +1,73 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import * as WebBrowser from 'expo-web-browser';
 import { useEffect, useState } from 'react';
 import { Text, View, useWindowDimensions } from 'react-native';
 import RenderHTML from 'react-native-render-html';
 import { useAppState } from '../../src/app-state';
 import { palette } from '../../src/careermap-data';
 import { getEntranceExamById } from '../../src/api/entranceExamApi';
-import { AnimatedPressable, Screen } from '../../src/careermap-ui';
+import { checkModuleAccess, getModules } from '../../src/api/moduleAccessApi';
+import { AnimatedPressable, Screen, UnlockBottomSheet } from '../../src/careermap-ui';
+import { useAuthStore } from '../../src/store/auth-store';
+import { openSubscriptionPrompt } from '../../src/subscription-flow';
+import { openExternalUrl } from '../../src/utils/openExternalUrl';
+import { PREVIEW_MODULES, isPreviewFree, loadPreviewFreeKeys } from '../../src/utils/previewAccess';
+import { VERIFY_FAILED_HEADING, VERIFY_FAILED_MESSAGE } from '../../src/utils/searchNavigation';
 
-// Exams opened during this session (the full record is loaded only when an exam is opened).
+// Exams opened recently (the full record is loaded only when an exam is opened). Entries belong
+// to the signed-in user and expire, so a logout / account switch or an admin edit is picked up.
+const EXAM_DETAIL_CACHE_TTL_MS = 5 * 60 * 1000;
 const examDetailCache = new Map();
+let examDetailCacheOwner = null;
+
+function readCachedExam(ownerKey, id) {
+    if (examDetailCacheOwner !== ownerKey) {
+        examDetailCache.clear();
+        examDetailCacheOwner = ownerKey;
+        return null;
+    }
+    const hit = examDetailCache.get(id);
+    if (!hit) return null;
+    if (Date.now() - hit.at > EXAM_DETAIL_CACHE_TTL_MS) {
+        examDetailCache.delete(id);
+        return null;
+    }
+    return hit.exam;
+}
+
+function writeCachedExam(ownerKey, id, exam) {
+    if (examDetailCacheOwner !== ownerKey) {
+        examDetailCache.clear();
+        examDetailCacheOwner = ownerKey;
+    }
+    examDetailCache.set(id, { exam, at: Date.now() });
+}
+
+/*
+ * The detail route can be opened directly (deep link careermap://entrance-exam-detail?examId=N,
+ * search, router.push), so it checks access itself instead of trusting the list screen:
+ * "full" opens every exam, "preview" only the free ones (first 4 of the full list), "locked" none.
+ * A failed check keeps the exam closed. Resolves to 'allowed' | 'locked' | 'failed'.
+ */
+async function resolveExamAccess(examId, moduleIdParam) {
+    try {
+        let moduleId = Number(moduleIdParam);
+        if (!moduleIdParam || !Number.isFinite(moduleId)) {
+            const modules = await getModules();
+            const matched = modules.find((module) => String(module?.title || '').trim().toLowerCase().includes('entrance exam'));
+            moduleId = Number(matched?.id);
+        }
+        if (!Number.isFinite(moduleId)) return 'failed';
+        const response = await checkModuleAccess(moduleId);
+        const mode = String(response?.mode || '').toLowerCase();
+        if (response?.allowed === false || mode === 'locked') return 'locked';
+        if (mode === 'full' || mode === 'unlocked') return 'allowed';
+        const freeKeys = await loadPreviewFreeKeys(PREVIEW_MODULES.entranceExam);
+        return isPreviewFree(freeKeys, { id: examId }) ? 'allowed' : 'locked';
+    } catch {
+        return 'failed';
+    }
+}
 
 function DetailCard({ title, children }) {
     const { preferences } = useAppState();
@@ -35,27 +92,43 @@ function DetailCard({ title, children }) {
 
 export default function EntranceExamDetailScreen() {
     const { preferences } = useAppState();
-    const { examId } = useLocalSearchParams();
+    const { examId, moduleId: moduleIdParam } = useLocalSearchParams();
     const { width: screenWidth } = useWindowDimensions();
+    const authUserId = useAuthStore((state) => state.user?.id ?? state.user?._id ?? '');
+    const accessToken = useAuthStore((state) => state.accessToken);
+    const cacheOwner = `${String(authUserId)}|${accessToken ? 'signed-in' : 'signed-out'}`;
     const id = String(examId ?? '');
-    const [exam, setExam] = useState(() => examDetailCache.get(id) || null);
+    const [exam, setExam] = useState(null);
     const [detailError, setDetailError] = useState('');
+    // 'checking' | 'allowed' | 'locked' | 'failed'
+    const [access, setAccess] = useState('checking');
     const [reloadKey, setReloadKey] = useState(0);
 
     useEffect(() => {
         let isMounted = true;
-        const cached = examDetailCache.get(id);
         setDetailError('');
-        setExam(cached || null);
-        if (cached || !id) {
-            if (!id) setDetailError('Could not load the exam details.');
+        setExam(null);
+        setAccess('checking');
+        if (!id) {
+            setAccess('allowed');
+            setDetailError('Could not load the exam details.');
             return undefined;
         }
 
         async function loadExam() {
             try {
+                const accessResult = await resolveExamAccess(id, moduleIdParam);
+                if (!isMounted) return;
+                setAccess(accessResult);
+                if (accessResult !== 'allowed') return;
+
+                const cached = readCachedExam(cacheOwner, id);
+                if (cached) {
+                    setExam(cached);
+                    return;
+                }
                 const full = await getEntranceExamById(id);
-                examDetailCache.set(id, full);
+                writeCachedExam(cacheOwner, id, full);
                 if (isMounted) setExam(full);
             } catch (loadError) {
                 if (isMounted) {
@@ -73,7 +146,42 @@ export default function EntranceExamDetailScreen() {
         return () => {
             isMounted = false;
         };
-    }, [id, reloadKey]);
+    }, [id, moduleIdParam, cacheOwner, reloadKey]);
+
+    const goBackToList = () => (router.canGoBack() ? router.back() : router.replace('/(drawer)/entrance-exam'));
+
+    if (access === 'locked') {
+        return (
+            <Screen>
+                <Text className={`text-[14px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>This exam is locked.</Text>
+                <UnlockBottomSheet
+                    title="Unlock Entrance Exams"
+                    subtitle="Subscribe to view more exam cards and open locked website links."
+                    onClose={goBackToList}
+                    onPress={() => openSubscriptionPrompt({ pathname: '/(drawer)/entrance-exam' })}
+                />
+            </Screen>
+        );
+    }
+
+    if (access === 'failed') {
+        return (
+            <Screen>
+                <View className="gap-2">
+                    <Text className={`text-[16px] font-bold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{VERIFY_FAILED_HEADING}</Text>
+                    <Text className={`text-[14px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{VERIFY_FAILED_MESSAGE}</Text>
+                    <View className="flex-row gap-3">
+                        <AnimatedPressable onPress={() => setReloadKey((value) => value + 1)} className="rounded-[10px] border border-brand px-3 py-1">
+                            <Text className="text-[12px] font-bold text-brand">Try again</Text>
+                        </AnimatedPressable>
+                        <AnimatedPressable onPress={goBackToList} className="rounded-[10px] border border-brand px-3 py-1">
+                            <Text className="text-[12px] font-bold text-brand">Back to exams</Text>
+                        </AnimatedPressable>
+                    </View>
+                </View>
+            </Screen>
+        );
+    }
 
     if (!exam) {
         return (
@@ -168,11 +276,10 @@ export default function EntranceExamDetailScreen() {
 
 
 
+                {exam.website && exam.website !== '#' ? (
                 <AnimatedPressable
                     onPress={() => {
-                        if (exam.website && exam.website !== '#') {
-                            WebBrowser.openBrowserAsync(exam.website);
-                        }
+                        void openExternalUrl(exam.website);
                     }}
                     className="mt-1 rounded-[18px] px-5 py-4"
                     style={{
@@ -189,6 +296,7 @@ export default function EntranceExamDetailScreen() {
                         <Text className="text-[18px] font-extrabold text-white">Visit Official Website</Text>
                     </View>
                 </AnimatedPressable>
+                ) : null}
             </View>
         </Screen>
     );

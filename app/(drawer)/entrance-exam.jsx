@@ -1,22 +1,119 @@
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { ScrollView, Text, View, Linking, TextInput, Pressable } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FlatList, ScrollView, Text, View, TextInput, Pressable } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAppState } from '../../src/app-state';
 import { palette } from '../../src/careermap-data';
 import { getEntranceExams ,getCategories} from '../../src/api/entranceExamApi';
 import { checkModuleAccess, getModules } from '../../src/api/moduleAccessApi';
-import { AnimatedPressable, Screen, SectionHeader, UnlockBottomSheet } from '../../src/careermap-ui';
+import { AnimatedPressable, Screen, SectionHeader, UnlockBottomSheet, mobileAssistantScrollProps } from '../../src/careermap-ui';
 import { openSubscriptionPrompt } from '../../src/subscription-flow';
-import { useSearchDeepLink } from '../../src/utils/searchNavigation';
+import { VERIFY_FAILED_HEADING, VERIFY_FAILED_MESSAGE, useSearchDeepLink } from '../../src/utils/searchNavigation';
 import { getDeadlineStatus, isComingSoonDeadline } from '../../src/utils/deadlineStatus';
 import { buildFreeKeys, isPreviewFree } from '../../src/utils/previewAccess';
+import { openExternalUrl } from '../../src/utils/openExternalUrl';
 const normalizeExamName = (value = '') => String(value).toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, '');
 const getExamFamily = (value = '') => {
     const normalized = normalizeExamName(value);
     const family = normalized.match(/^(cuet(?:pg|ug)|neet(?:pg|ug)|jee(?:main|advanced)|gate|cat|clat|upsc|ssc|ibps|nda|nata|bitsat|cet)/);
     return family?.[1] || normalized;
 };
+// The "Search Exam" dropdown shows at most this many matches; typing narrows the rest.
+const EXAM_DROPDOWN_LIMIT = 50;
+
+// One exam card. Memoised so a filter change only re-renders the cards whose props changed.
+const ExamCard = memo(function ExamCard({ exam, unlocked, darkMode, onLocked }) {
+    const hasWebsite = Boolean(exam.website && exam.website !== '#');
+    return (
+        <AnimatedPressable
+            className={`mb-3 rounded-[22px] border p-4 ${darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card shadow-card'}`}
+            onPress={() => {
+                if (!unlocked) onLocked();
+            }}
+        >
+           <View className="flex-row items-center gap-3">
+
+                {/* Document Icon */}
+               <View className="h-10 w-10 items-center justify-center rounded-[10px] shrink-0 mt-1" style={{ backgroundColor: `${palette.primary}15` }}>
+                    <Ionicons name="document-text-outline" size={20} color={palette.primary}/>
+                </View>
+
+                {/* Title + Dates + Button in column */}
+                <View className="flex-1 gap-2">
+
+                    <View className="flex-row items-start justify-between gap-3">
+                        <Text className={`flex-1 text-[15px] font-bold ${darkMode ? 'text-white' : 'text-ink'}`}>
+                            {exam.name}
+                        </Text>
+                        {!unlocked ? (
+                            <View className="h-6 w-6 items-center justify-center rounded-full bg-[#fdecea]">
+                                <Ionicons name="lock-closed" size={13} color="#e53935"/>
+                            </View>
+                        ) : (
+                            <View className="h-6 w-6 items-center justify-center rounded-full bg-[#e4f7ed]">
+                                <Ionicons name="lock-open" size={13} color="#2f9367"/>
+                            </View>
+                        )}
+                    </View>
+                    <View className="flex-row flex-wrap items-center gap-2">
+                        <View className="rounded-[10px] px-2 py-1" style={{ backgroundColor: `${palette.orange}20` }}>
+                            <Text className="text-[9px] font-bold uppercase" style={{ color: palette.orange }}>
+                                Issue: {exam.issueDate}
+                            </Text>
+                        </View>
+                        <View className="rounded-[10px] px-2 py-1" style={{ backgroundColor: `${palette.green}20` }}>
+                            <Text className="text-[9px] font-bold uppercase" style={{ color: palette.green }}>
+                                Last: {exam.lastDate}
+                            </Text>
+                        </View>
+                        {isComingSoonDeadline(exam.lastDateRaw) ? <View className="rounded-[10px] bg-[#fff1c2] px-2 py-1"><Text className="text-[9px] font-extrabold uppercase text-[#9a4a00]">Coming soon</Text></View> : null}
+                    </View>
+                    <View className="flex-row justify-end gap-3 border-t border-line pt-1">
+                        {hasWebsite ? (
+                            <AnimatedPressable
+                                onPress={(e) => {
+                                    e?.stopPropagation?.();
+                                    if (!unlocked) {
+                                        onLocked();
+                                        return;
+                                    }
+                                    void openExternalUrl(exam.website);
+                                }}
+                                className="rounded-full px-2 py-1.5"
+                            >
+                                <Text className="text-[10px] font-bold text-brand">
+                                    Visit Website
+                                </Text>
+                            </AnimatedPressable>
+                        ) : null}
+                        <Pressable
+                            onPress={(e) => {
+                                e?.stopPropagation?.();
+                                if (!unlocked) {
+                                    onLocked();
+                                    return;
+                                }
+                                router.push({
+                                    pathname: '/(drawer)/entrance-exam-detail',
+                                    params: { examId: String(exam.id) },
+                                });
+                            }}
+                            className="rounded-full px-2 py-1.5"
+                        >
+                            <Text className="text-[10px] font-bold text-brand">
+                                View
+                            </Text>
+                        </Pressable>
+                    </View>
+                </View>
+
+            </View>
+        </AnimatedPressable>
+    );
+});
+
 export default function EntranceExamScreen() {
     const params = useLocalSearchParams();
     const { preferences } = useAppState();
@@ -27,6 +124,14 @@ export default function EntranceExamScreen() {
     // "locked" = everything locked.
     const [accessMode, setAccessMode] = useState('preview');
     const [moduleAccessResolved, setModuleAccessResolved] = useState(false);
+    // True when module access could not be verified: everything stays locked until a retry works.
+    const [accessCheckFailed, setAccessCheckFailed] = useState(false);
+    const [accessReloadKey, setAccessReloadKey] = useState(0);
+    const [examsReloadKey, setExamsReloadKey] = useState(0);
+    const [deepLinkNotice, setDeepLinkNotice] = useState('');
+    const deepLinkRefetchRef = useRef('');
+    const listRef = useRef(null);
+    const insets = useSafeAreaInsets();
     const [showUnlockSheet, setShowUnlockSheet] = useState(false);
   const [modeFilter, setModeFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
@@ -60,7 +165,7 @@ const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
 
         loadEntranceExams();
         return () => { isMounted = false; };
-    }, []);
+    }, [examsReloadKey]);
 
     useEffect(() => {
     let isMounted = true;
@@ -94,18 +199,30 @@ const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
     useEffect(() => {
         let isMounted = true;
 
+        // Fail closed: if the module can't be found or the check fails, nothing is unlocked
+        // (same rule as openTarget's "Unable to verify access"). Only the server's answer
+        // decides the mode; an accessStatus route param is never trusted.
+        const failClosed = () => {
+            if (!isMounted) return;
+            setAccessMode('locked');
+            setAccessCheckFailed(true);
+            setModuleAccessResolved(true);
+        };
+
         async function loadModuleAccess() {
+            setModuleAccessResolved(false);
+            setAccessCheckFailed(false);
             try {
-                let moduleId = null;
-                const modules = await getModules();
-                const matchedModule = modules.find((module) => String(module?.title || '').trim().toLowerCase().includes('entrance exam'));
-                moduleId = Number(matchedModule?.id);
+                // The dashboard / drawer / search pass the module id; otherwise look it up.
+                let moduleId = Number(params.moduleId);
+                if (!params.moduleId || !Number.isFinite(moduleId)) {
+                    const modules = await getModules();
+                    const matchedModule = modules.find((module) => String(module?.title || '').trim().toLowerCase().includes('entrance exam'));
+                    moduleId = Number(matchedModule?.id);
+                }
 
                 if (!Number.isFinite(moduleId)) {
-                    if (isMounted) {
-                        setAccessMode('full');
-                        setModuleAccessResolved(true);
-                    }
+                    failClosed();
                     return;
                 }
 
@@ -122,10 +239,7 @@ const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
                 }
                 setModuleAccessResolved(true);
             } catch (_error) {
-                if (isMounted) {
-                    setAccessMode('full');
-                    setModuleAccessResolved(true);
-                }
+                failClosed();
             }
         }
 
@@ -134,7 +248,7 @@ const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
         return () => {
             isMounted = false;
         };
-    }, []);
+    }, [params.moduleId, accessReloadKey]);
 
     const hasFullAccess = accessMode === 'full';
     // The free exams in preview are the first 4 of the FULL list in API order, not of whatever
@@ -146,7 +260,21 @@ const [showCategoryDropdown, setShowCategoryDropdown] = useState(false);
     // Global search / Career Bee: pre-select the exam with the screen's own "Search Exam" filter.
     useSearchDeepLink(params.searchKey, !isLoading && moduleAccessResolved, () => {
         const examId = typeof params.examId === 'string' ? params.examId : '';
-        if (!examId || !entranceExams.some((exam) => String(exam.id) === examId)) {
+        if (!examId) {
+            return;
+        }
+        setDeepLinkNotice('');
+        if (!entranceExams.some((exam) => String(exam.id) === examId)) {
+            // The list may be older than the search result (newly added exam): reload it once
+            // and try again; if the exam is still missing, say so instead of doing nothing.
+            const key = String(params.searchKey || '');
+            if (deepLinkRefetchRef.current !== key) {
+                deepLinkRefetchRef.current = key;
+                setIsLoading(true);
+                setExamsReloadKey((value) => value + 1);
+                return false;
+            }
+            setDeepLinkNotice('This exam is not available right now.');
             return;
         }
         if (params.fromGlobalSearch === '1') {
@@ -260,8 +388,25 @@ const filtered = useMemo(
     }
 }, [categoryFilter, categoryOptions]);
 
-    return (
-        <Screen>
+    const darkMode = preferences.darkMode;
+    const openUnlockSheet = useCallback(() => setShowUnlockSheet(true), []);
+    const renderExamCard = useCallback(({ item }) => (
+        <ExamCard
+            exam={item}
+            unlocked={accessMode === 'full' || (accessMode === 'preview' && isPreviewFree(previewFreeKeys, item))}
+            darkMode={darkMode}
+            onLocked={openUnlockSheet}
+        />
+    ), [accessMode, previewFreeKeys, darkMode, openUnlockSheet]);
+
+    // Same as Screen's ScrollView: start at the top whenever the screen gets focus.
+    useFocusEffect(useCallback(() => {
+        const frame = requestAnimationFrame(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }));
+        return () => cancelAnimationFrame(frame);
+    }, []));
+
+    const listHeader = (
+        <View style={{ gap: 18, paddingBottom: 12 }}>
             <SectionHeader
                 title="Entrance Exams"
                 subtitle="Practice tests and exam preparation guides."
@@ -328,7 +473,7 @@ const filtered = useMemo(
                                 No exams found
                             </Text>
                         ) : (
-                            searchableExams.map((exam) => (
+                            searchableExams.slice(0, EXAM_DROPDOWN_LIMIT).map((exam) => (
                                 <Pressable
                                     key={exam.id}
                                     onPress={() => {
@@ -353,6 +498,11 @@ const filtered = useMemo(
                                 </Pressable>
                             ))
                         )}
+                        {searchableExams.length > EXAM_DROPDOWN_LIMIT ? (
+                            <Text className={`px-4 py-3 text-center text-[12px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>
+                                {`${searchableExams.length - EXAM_DROPDOWN_LIMIT} more - type to narrow the list`}
+                            </Text>
+                        ) : null}
                     </ScrollView>
                 </View>
             ) : null}
@@ -572,107 +722,54 @@ setShowCategoryDropdown(false);
 
             <View className="gap-3">
                 {isLoading ? <Text className={`text-[14px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Loading entrance exams...</Text> : null}
-                {!isLoading && loadError ? <Text className="text-[14px] text-brand">{loadError}</Text> : null}
-
-                {!moduleAccessResolved ? <Text className={`text-[14px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Checking access...</Text> : null}
-
-                {filtered.map((exam) => {
-                    const cardUnlocked = isExamUnlocked(exam);
-                    return (
-                    <AnimatedPressable
-                        key={exam.id}
-                        className={`mb-3 rounded-[22px] border p-4 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card shadow-card'}`}
-                        onPress={() => {
-                            if (!cardUnlocked) {
-                                setShowUnlockSheet(true);
-                                return;
-                            }
-                        }}
-                    >
-                       <View className="flex-row items-center gap-3">
-
-                            {/* Document Icon */}
-                           <View className="h-10 w-10 items-center justify-center rounded-[10px] shrink-0 mt-1" style={{ backgroundColor: `${palette.primary}15` }}>
-                                <Ionicons name="document-text-outline" size={20} color={palette.primary}/>
-                            </View>
-
-                            {/* Title + Dates + Button in column */}
-                            <View className="flex-1 gap-2">
-
-                                <View className="flex-row items-start justify-between gap-3">
-                                    <Text className={`flex-1 text-[15px] font-bold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>
-                                        {exam.name}
-                                    </Text>
-                                    {!cardUnlocked ? (
-                                        <View className="h-6 w-6 items-center justify-center rounded-full bg-[#fdecea]">
-                                            <Ionicons name="lock-closed" size={13} color="#e53935"/>
-                                        </View>
-                                    ) : (
-                                        <View className="h-6 w-6 items-center justify-center rounded-full bg-[#e4f7ed]">
-                                            <Ionicons name="lock-open" size={13} color="#2f9367"/>
-                                        </View>
-                                    )}
-                                </View>
-                                <View className="flex-row flex-wrap items-center gap-2">
-                                    <View className="rounded-[10px] px-2 py-1" style={{ backgroundColor: `${palette.orange}20` }}>
-                                        <Text className="text-[9px] font-bold uppercase" style={{ color: palette.orange }}>
-                                            Issue: {exam.issueDate}
-                                        </Text>
-                                    </View>
-                                    <View className="rounded-[10px] px-2 py-1" style={{ backgroundColor: `${palette.green}20` }}>
-                                        <Text className="text-[9px] font-bold uppercase" style={{ color: palette.green }}>
-                                            Last: {exam.lastDate}
-                                        </Text>
-                                    </View>
-                                    {isComingSoonDeadline(exam.lastDateRaw) ? <View className="rounded-[10px] bg-[#fff1c2] px-2 py-1"><Text className="text-[9px] font-extrabold uppercase text-[#9a4a00]">Coming soon</Text></View> : null}
-                                </View>
-                                <View className="flex-row justify-end gap-3 border-t border-line pt-1">
-                                    <AnimatedPressable
-                                        onPress={(e) => {
-                                            e.stopPropagation();
-                                            if (!cardUnlocked) {
-                                                setShowUnlockSheet(true);
-                                                return;
-                                            }
-                                            if (exam.website && exam.website !== '#') Linking.openURL(exam.website);
-                                        }}
-                                        className="rounded-full px-2 py-1.5"
-                                    >
-                                        <Text className="text-[10px] font-bold text-brand">
-                                            Visit Website
-                                        </Text>
-                                    </AnimatedPressable>
-                                    <Pressable
-                                        onPress={(e) => {
-                                            e.stopPropagation();
-                                            if (!cardUnlocked) {
-                                                setShowUnlockSheet(true);
-                                                return;
-                                            }
-                                            router.push({
-                                                pathname: '/(drawer)/entrance-exam-detail',
-                                                params: { examId: String(exam.id) },
-                                            });
-                                        }}
-                                        className="rounded-full px-2 py-1.5"
-                                    >
-                                        <Text className="text-[10px] font-bold text-brand">
-                                            View
-                                        </Text>
-                                    </Pressable>
-                                </View>
-                            </View>
-
-                        </View>
-                    </AnimatedPressable>
-                );})}
-
-                {!isLoading && !loadError && filtered.length === 0 ? (
-                    <View className="items-center justify-center py-12">
-                        <Text className={`text-[14px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No exams match your filters</Text>
+                {!isLoading && loadError ? (
+                    <View className="flex-row flex-wrap items-center gap-3">
+                        <Text className="text-[14px] text-brand">{loadError}</Text>
+                        <AnimatedPressable onPress={() => setExamsReloadKey((value) => value + 1)} className="rounded-[10px] border border-brand px-3 py-1">
+                            <Text className="text-[12px] font-bold text-brand">Try again</Text>
+                        </AnimatedPressable>
                     </View>
                 ) : null}
+
+                {!moduleAccessResolved ? <Text className={`text-[14px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Checking access...</Text> : null}
+                {moduleAccessResolved && accessCheckFailed ? (
+                    <View className={`gap-2 rounded-[16px] border p-3 ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-[#fdf0ee]'}`}>
+                        <Text className={`text-[14px] font-bold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{VERIFY_FAILED_HEADING}</Text>
+                        <Text className={`text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{VERIFY_FAILED_MESSAGE}</Text>
+                        <AnimatedPressable onPress={() => setAccessReloadKey((value) => value + 1)} className="self-start rounded-[10px] border border-brand px-3 py-1">
+                            <Text className="text-[12px] font-bold text-brand">Try again</Text>
+                        </AnimatedPressable>
+                    </View>
+                ) : null}
+                {deepLinkNotice ? <Text className="text-[14px] text-brand">{deepLinkNotice}</Text> : null}
             </View>
+        </View>
+    );
+
+    return (
+        <Screen scroll={false} contentContainerClassName="flex-1">
+            <View style={{ flex: 1 }}>
+                <FlatList
+                    ref={listRef}
+                    data={filtered}
+                    keyExtractor={(exam) => String(exam.id)}
+                    renderItem={renderExamCard}
+                    extraData={renderExamCard}
+                    ListHeaderComponent={listHeader}
+                    ListEmptyComponent={!isLoading && !loadError ? (
+                        <View className="items-center justify-center py-12">
+                            <Text className={`text-[14px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No exams match your filters</Text>
+                        </View>
+                    ) : null}
+                    ItemSeparatorComponent={ExamSeparator}
+                    initialNumToRender={8}
+                    maxToRenderPerBatch={8}
+                    windowSize={7}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                    contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 20, paddingBottom: Math.max(insets.bottom + 120, 140) }}
+                    {...mobileAssistantScrollProps}
+                />
             {showUnlockSheet ? (
                 <UnlockBottomSheet
                     title="Unlock Entrance Exams"
@@ -684,6 +781,9 @@ setShowCategoryDropdown(false);
                     }}
                 />
             ) : null}
+            </View>
         </Screen>
     );
 }
+
+const ExamSeparator = () => <View style={{ height: 12 }} />;

@@ -47,6 +47,19 @@ function formatPrice(value) {
   return `Rs ${rawValue}`;
 }
 
+// Plans.validity is a whole number of DAYS on the backend (subscription endDate = start + validity days).
+export function formatPlanValidity(value) {
+  const days = Number(value);
+  if (!Number.isFinite(days) || days <= 0) {
+    return '';
+  }
+  if (days % 365 === 0) {
+    const years = days / 365;
+    return years === 1 ? '1 year' : `${years} years`;
+  }
+  return days === 1 ? '1 day' : `${days} days`;
+}
+
 function resolvePlanKey(item) {
   const name = String(item?.name || '').trim();
   const planType = String(item?.plan_type || '').trim().toLowerCase();
@@ -120,7 +133,8 @@ function mapPlanItem(item, index = 0) {
     price: formatPrice(item?.price),
    description: stripHtml(item?.description) || 'Plan description is not available.',
     descriptionHtml: item?.description || '', features,
-    validity: item?.validity || '12 month',
+    validity: formatPlanValidity(item?.validity),
+    validityDays: Number(item?.validity) > 0 ? Number(item.validity) : null,
     planType: item?.plan_type || '',
     badge: resolvePlanLabel(item),
     recommended: String(item?.plan_type || '').trim().toLowerCase().includes('recommended'),

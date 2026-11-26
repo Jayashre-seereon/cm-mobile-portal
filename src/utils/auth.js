@@ -1,8 +1,10 @@
 export function normalizeMobile(value = '') {
-  const digits = value.replace(/\D/g, '');
+  // Drop the trunk / international zeros ("0XXXXXXXXXX", "0091...") and a +91 country code, so
+  // "09876543210" and "+91 098765 43210" both become "9876543210" instead of a wrong 10 digits.
+  let digits = String(value ?? '').replace(/\D/g, '').replace(/^0+/, '');
 
   if (digits.startsWith('91') && digits.length > 10) {
-    return digits.slice(-10);
+    digits = digits.slice(2).replace(/^0+/, '');
   }
 
   return digits.slice(0, 10);
@@ -180,9 +182,19 @@ export function formatDateForApi(value = '') {
   return parsedDate.toISOString();
 }
 
+// A date of birth has to be a real past date, not before 1900.
+const MIN_BIRTH_YEAR = 1900;
+
+function isBirthDateInRange(parsedDate) {
+  if (!parsedDate) return false;
+  const now = new Date();
+  const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+  return parsedDate.getUTCFullYear() >= MIN_BIRTH_YEAR && parsedDate.getTime() <= todayUtc;
+}
+
 export function isValidDateInput(value = '') {
   const dateValue = value.trim();
-  return Boolean(parseDateInput(dateValue));
+  return isBirthDateInRange(parseDateInput(dateValue));
 }
 
 export function getDateError(value = '') {
@@ -191,8 +203,17 @@ export function getDateError(value = '') {
     return 'Date of birth is required.';
   }
 
-  if (!isValidDateInput(dateValue)) {
+  const parsedDate = parseDateInput(dateValue);
+  if (!parsedDate) {
     return 'Use DD-MM-YYYY format with a real date.';
+  }
+
+  if (parsedDate.getUTCFullYear() < MIN_BIRTH_YEAR) {
+    return `Date of birth cannot be before ${MIN_BIRTH_YEAR}.`;
+  }
+
+  if (!isBirthDateInRange(parsedDate)) {
+    return 'Date of birth cannot be in the future.';
   }
 
   return '';

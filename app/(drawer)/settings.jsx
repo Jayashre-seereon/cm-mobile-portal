@@ -3,17 +3,18 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { useAppState } from '../../src/app-state';
-import { changePassword, createHelpCenterRequest, getApiErrorMessage, logoutUser } from '../../src/api/authApi';
+import { changePassword, createHelpCenterRequest, getApiErrorMessage, signOutOnServer } from '../../src/api/authApi';
 import { palette } from '../../src/careermap-data';
 import { AnimatedPressable, Screen } from '../../src/careermap-ui';
 import { StaggerFadeUpItem } from '../../src/page-transition';
 import { useAuthStore } from '../../src/store/auth-store';
-import { removePushTokenFromBackend } from '../../src/utils/pushNotifications';
+import { isStrongPassword } from '../../src/utils/auth';
 export default function SettingsScreen() {
     const { preferences, requestProfileEdit, toggleDarkMode, userProfile } = useAppState();
     const { view: initialView } = useLocalSearchParams();
     const authUser = useAuthStore((state) => state.user);
-    const accessToken = useAuthStore((state) => state.accessToken);
+    const setAccessToken = useAuthStore((state) => state.setAccessToken);
+    const setRefreshToken = useAuthStore((state) => state.setRefreshToken);
     const clearAuthFlow = useAuthStore((state) => state.clearAuthFlow);
     const logout = useAuthStore((state) => state.logout);
     const [view, setView] = useState(initialView === 'help' ? 'help' : 'menu');
@@ -38,6 +39,7 @@ export default function SettingsScreen() {
         message: '',
     });
     const [isLoggingOut, setIsLoggingOut] = useState(false);
+    const [isSavingPassword, setIsSavingPassword] = useState(false);
     const [feedback, setFeedback] = useState({ type: 'idle', message: '' });
     useEffect(() => {
         if (!feedback.message)
@@ -85,8 +87,9 @@ export default function SettingsScreen() {
         { label: 'Help Centre', icon: 'help-circle-outline', color: palette.teal, action: () => setView('help') },
     ], [preferences.darkMode, requestProfileEdit, toggleDarkMode]);
     if (view === 'password') {
-        const canSave = passwordForm.currentPassword.length > 0 &&
-            passwordForm.newPassword.length >= 6 &&
+        const canSave = !isSavingPassword &&
+            passwordForm.currentPassword.length > 0 &&
+            isStrongPassword(passwordForm.newPassword) &&
             passwordForm.newPassword === passwordForm.confirmPassword;
         const handlePasswordChange = (key, value) => {
             setPasswordForm((current) => {
@@ -100,6 +103,9 @@ export default function SettingsScreen() {
             });
         };
         const handleSavePassword = async () => {
+            if (isSavingPassword) {
+                return;
+            }
             const nextErrors = {
                 currentPassword: validatePasswordField('currentPassword', passwordForm.currentPassword),
                 newPassword: validatePasswordField('newPassword', passwordForm.newPassword),
@@ -116,7 +122,16 @@ export default function SettingsScreen() {
             }
 
             try {
+                setIsSavingPassword(true);
                 const response = await changePassword(passwordForm);
+                // The server ends sessions holding the old password and returns fresh tokens for this one;
+                // keep them, or this phone is logged out when the current access token expires.
+                if (response?.accessToken) {
+                    setAccessToken(response.accessToken);
+                }
+                if (response?.refreshToken) {
+                    setRefreshToken(response.refreshToken);
+                }
                 setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
                 setPasswordErrors({ currentPassword: '', newPassword: '', confirmPassword: '' });
                 setShowPassword({ currentPassword: false, newPassword: false, confirmPassword: false });
@@ -130,6 +145,9 @@ export default function SettingsScreen() {
                     type: 'error',
                     message: getApiErrorMessage(error, 'Failed to change password.'),
                 });
+            }
+            finally {
+                setIsSavingPassword(false);
             }
         };
         return (<Screen>
@@ -157,7 +175,7 @@ export default function SettingsScreen() {
               {passwordErrors[key] ? (<Text className="text-[11px] font-semibold text-danger">{passwordErrors[key]}</Text>) : null}
             </View>))}
               <AnimatedPressable className="rounded-[18px] bg-brand py-4" disabled={!canSave} onPress={() => { void handleSavePassword(); }}>
-            <Text className="text-center text-[15px] font-extrabold text-white">Save Password</Text>
+            <Text className="text-center text-[15px] font-extrabold text-white">{isSavingPassword ? 'Saving...' : 'Save Password'}</Text>
           </AnimatedPressable>
           {feedback.message ? (<View className={`rounded-[18px] border px-4 py-3 ${feedback.type === 'error'
                 ? preferences.darkMode
@@ -272,14 +290,8 @@ export default function SettingsScreen() {
                 }
                 try {
                     setIsLoggingOut(true);
-                    await removePushTokenFromBackend();
-                    await logoutUser(accessToken);
-                }
-                catch (_error) {
-                    setFeedback({
-                        type: 'error',
-                        message: 'Logout API did not respond. Signed out locally.',
-                    });
+                    // Push-token removal and refresh-token revoke run together and wait a few seconds at most.
+                    await signOutOnServer();
                 }
                 finally {
                     clearAuthFlow();

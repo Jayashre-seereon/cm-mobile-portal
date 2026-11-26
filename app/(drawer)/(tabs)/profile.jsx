@@ -3,17 +3,15 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { useAppState } from '../../../src/app-state';
-import { getApiErrorMessage, getProfileUpdatePayload, getUserDashboard, logoutUser, updateUserProfile } from '../../../src/api/authApi';
+import { getApiErrorMessage, getProfileUpdatePayload, getUserDashboard, signOutOnServer, updateUserProfile } from '../../../src/api/authApi';
 import { palette } from '../../../src/careermap-data';
 import { AnimatedPressable, Pill, Screen } from '../../../src/careermap-ui';
 import { StaggerFadeUpItem } from '../../../src/page-transition';
 import { formatDateForApi, formatDateForDisplay, formatPhone, getDateError, getDisplayName, mapApiUserToProfile, mergeServerProfile, splitFullName } from '../../../src/utils/auth';
 import { useAuthStore } from '../../../src/store/auth-store';
-import { removePushTokenFromBackend } from '../../../src/utils/pushNotifications';
 export default function ProfileScreen() {
     const { activePlanId, bookings, hasActiveSubscription, onboarding, preferences, profileEditRequestKey, requestProfileEdit, savedCareers, saveUserProfile, subscriptionRecords, testHistory, toggleDarkMode, userProfile, } = useAppState();
     const authUser = useAuthStore((state) => state.user);
-    const accessToken = useAuthStore((state) => state.accessToken);
     const setAuthUser = useAuthStore((state) => state.setUser);
     const setProfileIncomplete = useAuthStore((state) => state.setProfileIncomplete);
     const clearAuthFlow = useAuthStore((state) => state.clearAuthFlow);
@@ -40,7 +38,8 @@ export default function ProfileScreen() {
             name: combinedName || userProfile.name || '',
             email: userProfile.email || authUser?.email || '',
             mobile: userProfile.mobile || authUser?.mobile || '',
-            password: userProfile.password || '',
+            // The password is never copied into the profile form.
+            password: '',
         });
     }, [authUser?.email, authUser?.firstName, authUser?.lastName, authUser?.mobile, userProfile]);
     useEffect(() => {
@@ -165,7 +164,7 @@ export default function ProfileScreen() {
         const payload = getProfileUpdatePayload({
             firstName,
             lastName,
-            username: authUser?.username || authUser?.email?.split('@')[0] || '',
+            username: authUser?.username || undefined,
             country: form.country.trim() || 'India',
             state: form.stateName.trim(),
             city: form.city.trim(),
@@ -173,9 +172,18 @@ export default function ProfileScreen() {
             gender: form.gender,
             address: form.address.trim(),
             dataOfBirth: form.dob ? formatDateForApi(form.dob.trim()) : null,
-            image: authUser?.image || 'image_url.png',
+            image: authUser?.image || undefined,
             status: authUser?.status || 'Active',
         }, authUser || {});
+        // Username / photo are not edited here and the login response does not include them. When they are
+        // not known yet, leave them out so the server keeps the saved values (instead of the email prefix and
+        // a placeholder image overwriting them).
+        if (!authUser?.username) {
+            delete payload.username;
+        }
+        if (!authUser?.image) {
+            delete payload.image;
+        }
         try {
             setIsSaving(true);
             setSaveStatus({ type: 'idle', message: '' });
@@ -446,11 +454,9 @@ export default function ProfileScreen() {
                 }
                 try {
                     setIsLoggingOut(true);
-                    await removePushTokenFromBackend();
-                    await logoutUser(accessToken);
-                }
-                catch (_error) {
-                    // Continue with local sign-out even if the server logout call fails.
+                    // Push-token removal and refresh-token revoke run together and wait a few seconds at most;
+                    // local sign-out always follows.
+                    await signOutOnServer();
                 }
                 finally {
                     clearAuthFlow();

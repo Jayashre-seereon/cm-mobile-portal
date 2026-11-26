@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {Image, Linking, ScrollView, Text, View } from 'react-native';
+import {Image, ScrollView, Text, View } from 'react-native';
+import { openExternalUrl } from '../../../src/utils/openExternalUrl';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams } from 'expo-router';
@@ -292,7 +293,7 @@ export default function LearnScreen() {
                     if (hasFullAccess) {
                         setSelectedVideo(item.id);
                         if (item.url !== '#') {
-                            Linking.openURL(item.url);
+                            void openExternalUrl(item.url);
                         }
                         return;
                     }
@@ -305,7 +306,7 @@ export default function LearnScreen() {
                     registerFreeDetailAccess('master-class', classId);
                     setSelectedVideo(item.id);
                     if (item.url !== '#') {
-                        Linking.openURL(item.url);
+                        void openExternalUrl(item.url);
                     }
                     startMasterClassPreview({
                         moduleId: resolvedModuleId,

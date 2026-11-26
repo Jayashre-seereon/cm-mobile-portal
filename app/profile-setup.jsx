@@ -3,7 +3,7 @@ import { router } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getApiErrorMessage, signupUser } from '../src/api/authApi';
+import { getApiErrorMessage, sendOtp, signupUser } from '../src/api/authApi';
 import { useAppState } from '../src/app-state';
 import { palette } from '../src/careermap-data';
 import { AnimatedPressable } from '../src/careermap-ui';
@@ -29,6 +29,7 @@ export default function ProfileSetupScreen() {
     const markAuthenticatedSession = useAuthStore((state) => state.markAuthenticatedSession);
     const clearAuthFlow = useAuthStore((state) => state.clearAuthFlow);
     const setOnboardingData = useAuthStore((state) => state.setOnboardingData);
+    const setTempToken = useAuthStore((state) => state.setTempToken);
     const mergedOnboarding = useMemo(() => ({
         ...onboarding,
         ...onboardingData,
@@ -42,9 +43,10 @@ export default function ProfileSetupScreen() {
         username: buildUsername(signupForm.name || mergedOnboarding.name, signupForm.email || userProfile.email),
         email: signupForm.email || userProfile.email || '',
         mobile: signupForm.mobile || normalizeMobile(userProfile.mobile),
-        password: signupForm.password || userProfile.password || '',
+        // Never prefilled from the app-wide profile: the password lives only in the signup flow.
+        password: signupForm.password || '',
         address: userProfile.address,
-        gender: userProfile.gender,
+        gender: userProfile.gender || onboardingData.gender || onboarding.gender || '',
         dob: formatDateForDisplay(userProfile.dob),
         city: signupForm.city || userProfile.city || '',
         stateName: signupForm.state || userProfile.stateName || '',
@@ -175,7 +177,7 @@ export default function ProfileSetupScreen() {
             return;
         }
         if (nextErrors.dob) {
-            setStatus({ type: 'error', message: 'Date of birth must be in DD-MM-YYYY format.' });
+            setStatus({ type: 'error', message: nextErrors.dob });
             return;
         }
 
@@ -211,13 +213,22 @@ export default function ProfileSetupScreen() {
             saveUserProfile({
                 ...userProfile,
                 ...form,
-                mobile: formatOtpMobile(form.mobile),
+                // The account uses the OTP-verified number (from the temp token), and the password is
+                // never kept in app-wide state.
+                mobile: response.user?.mobile || formatOtpMobile(form.mobile),
+                password: '',
                 childName: mergedOnboarding.childName,
             });
             showPromoMessage(response.message || 'Profile created successfully.');
             router.replace('/promo');
         }
         catch (error) {
+            if (error?.response?.status === 401) {
+                // The OTP verification (temp token, valid 10 minutes) expired. Keep everything typed here,
+                // send a fresh OTP and come back to this same form after verifying.
+                await restartOtpVerification();
+                return;
+            }
             setStatus({
                 type: 'error',
                 message: getApiErrorMessage(error, 'Failed to create profile.'),
@@ -225,6 +236,31 @@ export default function ProfileSetupScreen() {
         }
         finally {
             setIsSubmitting(false);
+        }
+    };
+    const restartOtpVerification = async () => {
+        const verifiedMobile = formatOtpMobile(signupForm.mobile || form.mobile);
+        setTempToken('');
+        try {
+            const otpResponse = await sendOtp(verifiedMobile, 'signup');
+            // TEMP-DEBUG: remove before production (same as the login screen)
+            const devOtp = otpResponse?.otp || otpResponse?.data?.otp;
+            setStatus({ type: 'error', message: 'Your verification expired. Enter the new OTP to finish creating your account.' });
+            router.push({
+                pathname: '/otp-verify',
+                params: {
+                    identifier: verifiedMobile,
+                    otpType: 'signup',
+                    resume: '1',
+                    devOtp: devOtp || '',
+                },
+            });
+        }
+        catch (otpError) {
+            setStatus({
+                type: 'error',
+                message: getApiErrorMessage(otpError, 'Your verification expired. Please go back and verify your mobile number again.'),
+            });
         }
     };
     return (<SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}> 
@@ -301,7 +337,7 @@ export default function ProfileSetupScreen() {
             <Text className={`text-[12px] font-extrabold ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{label}</Text>
             <View className={`h-14 flex-row items-center gap-2.5 rounded-[18px] border px-4 ${fieldErrors[key] ? 'border-danger' : preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`}>
               <Ionicons name={icon} size={18} color={palette.muted}/>
-              <TextInput value={form[key]} onChangeText={(value) => {
+              <TextInput value={form[key]} editable={key !== 'mobile'} onChangeText={(value) => {
                 if (key === 'mobile') {
                     update(key, normalizeMobile(value));
                 }
@@ -313,6 +349,7 @@ export default function ProfileSetupScreen() {
                   <Ionicons name={showPassword ? 'eye-off-outline' : 'eye-outline'} size={18} color={palette.muted}/>
                 </AnimatedPressable>) : null}
             </View>
+            {key === 'mobile' ? (<Text className={`mt-0.5 text-[11px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>Verified by OTP. To use a different number, go back and verify it.</Text>) : null}
             {fieldErrors[key] ? (<Text className="mt-0.5 text-[11px] font-semibold text-danger">{fieldErrors[key]}</Text>) : null}
           </View>))}
 

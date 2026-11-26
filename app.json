@@ -1,4 +1,3 @@
-
 {
   "expo": {
     "name": "CareerMap",
@@ -12,8 +11,25 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.global.careermap",
+      "associatedDomains": [
+        "applinks:thecareermap.in",
+        "applinks:www.thecareermap.in",
+        "applinks:careermap-user-portal.vercel.app",
+        "applinks:cm-user-portal.vercel.app"
+      ],
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "LSApplicationQueriesSchemes": [
+          "tez",
+          "gpay",
+          "phonepe",
+          "paytmmp",
+          "bhim",
+          "credpay",
+          "mobikwik",
+          "amazonpay",
+          "upi"
+        ]
       }
     },
     "android": {
@@ -27,7 +43,20 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.global.careermap",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 1
+      "versionCode": 1,
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            { "scheme": "https", "host": "thecareermap.in", "pathPrefix": "/reset-password" },
+            { "scheme": "https", "host": "www.thecareermap.in", "pathPrefix": "/reset-password" },
+            { "scheme": "https", "host": "careermap-user-portal.vercel.app", "pathPrefix": "/reset-password" },
+            { "scheme": "https", "host": "cm-user-portal.vercel.app", "pathPrefix": "/reset-password" }
+          ],
+          "category": ["BROWSABLE", "DEFAULT"]
+        }
+      ]
     },
     "web": {
       "output": "static",
@@ -49,7 +78,8 @@
       ],
       "expo-font",
       "@react-native-community/datetimepicker",
-      "expo-notifications"
+      "expo-notifications",
+      "expo-secure-store"
     ],
     "experiments": {
       "reactCompiler": true

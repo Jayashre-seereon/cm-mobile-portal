@@ -2,10 +2,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, View ,Linking, useWindowDimensions} from 'react-native';
+import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import RenderHTML from 'react-native-render-html';import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCareerLibraryCategoriesByStream, getCareerLibraryDetails, getCareerLibraryNext, getCareerLibraryStreams, startCareerLibraryPreview } from '../../../src/api/careerLibraryApi';
-import { getCareerLibraryInstitutions } from '../../../src/api/instituteApi';
+import { getCareerLibraryInstitutions, getInstituteFilters } from '../../../src/api/instituteApi';
 import { checkModuleAccess, getModules } from '../../../src/api/moduleAccessApi';
 import { useAppState } from '../../../src/app-state';
 import { Screen, UnlockBottomSheet, mobileAssistantScrollProps } from '../../../src/careermap-ui';
@@ -13,6 +13,7 @@ import { palette } from '../../../src/careermap-data';
 import { StaggerFadeUpItem } from '../../../src/page-transition';
 import { openSubscriptionPrompt } from '../../../src/subscription-flow';
 import { useSearchDeepLink } from '../../../src/utils/searchNavigation';
+import { openExternalUrl } from '../../../src/utils/openExternalUrl';
 import { Video, ResizeMode } from 'expo-av';
 import { Image } from 'react-native';
 
@@ -97,12 +98,40 @@ function InstituteResultsSection({ title, scope, region, badge, emptyText, showL
     const requestIdRef = useRef(0);
     const pageSize = 12;
 
-    const otherCountryStates = useMemo(() => Array.from(new Set(
-        institutes
-            .filter((item) => normalizeLocationFilter(item.country) !== 'india')
-            .map((item) => item.state)
-            .filter(Boolean)
-    )), [institutes]);
+    const [otherStates, setOtherStates] = useState(null);
+    // Same as the user portal: states for institutes outside India come from the filters API
+    // (every page of the selection), not only from the 12 cards on the current page.
+    const otherCountryStates = useMemo(() => {
+        if (otherStates) return otherStates;
+        return Array.from(new Set(
+            institutes
+                .filter((item) => normalizeLocationFilter(item.country) !== 'india')
+                .map((item) => item.state)
+                .filter(Boolean)
+        ));
+    }, [institutes, otherStates]);
+
+    useEffect(() => {
+        if (!showLocationFilters || country !== 'Other') {
+            setOtherStates(null);
+            return undefined;
+        }
+        let active = true;
+        getInstituteFilters({
+            country: 'Other',
+            categoryId: scope.categoryId,
+            secondcategoryId: scope.secondcategoryId,
+            subcategoryId: scope.subcategoryId,
+            type: filter === 'govt' ? 'Govt' : filter === 'private' ? 'Pvt' : '',
+        })
+            .then((result) => {
+                if (active) setOtherStates(result.states.map((entry) => entry.state).filter(Boolean));
+            })
+            .catch(() => {
+                if (active) setOtherStates(null);
+            });
+        return () => { active = false; };
+    }, [scope.categoryId, scope.secondcategoryId, scope.subcategoryId, country, filter, showLocationFilters]);
 
     useEffect(() => {
         let active = true;
@@ -114,6 +143,9 @@ function InstituteResultsSection({ title, scope, region, badge, emptyText, showL
             page,
             limit: pageSize,
             region,
+            // India / Other is sent to the server (country=india or excludeCountry=india) so the
+            // pages and the page count only cover the chosen side.
+            country: showLocationFilters ? country : '',
             state,
             type: filter === 'govt' ? 'Govt' : filter === 'private' ? 'Pvt' : '',
         })
@@ -134,7 +166,7 @@ function InstituteResultsSection({ title, scope, region, badge, emptyText, showL
                 if (active && requestId === requestIdRef.current) setLoading(false);
             });
         return () => { active = false; };
-    }, [scope.categoryId, scope.secondcategoryId, scope.subcategoryId, region, state, filter, country, page, retryToken]);
+    }, [scope.categoryId, scope.secondcategoryId, scope.subcategoryId, region, state, filter, country, page, retryToken, showLocationFilters]);
 
     const totalItems = Number(pagination?.total ?? pagination?.totalCount ?? 0);
     const totalPages = Math.max(1, Number(pagination?.totalPages || Math.ceil(totalItems / pageSize) || 1));
@@ -143,11 +175,8 @@ function InstituteResultsSection({ title, scope, region, badge, emptyText, showL
         const parsed = new Date(value);
         return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
     };
-    const filtered = institutes.filter((item) => {
-        if (!showLocationFilters) return true;
-        if (country === 'India') return normalizeLocationFilter(item.country) === 'india';
-        return normalizeLocationFilter(item.country) !== 'india';
-    });
+    // The server already filtered by country, so the page is shown as returned.
+    const filtered = institutes;
     const stateOptions = country === 'India' ? INDIA_STATE_OPTIONS : otherCountryStates;
     const controlClass = `flex-row items-center justify-between rounded-[12px] border px-3 py-2.5 ${darkMode ? 'border-[#302a30] bg-[#080808]' : 'border-[#d7c3bc] bg-white'}`;
     const controlTextClass = `text-[12px] font-semibold ${darkMode ? 'text-white' : 'text-ink'}`;
@@ -234,7 +263,7 @@ function InstituteResultsSection({ title, scope, region, badge, emptyText, showL
                         </View> : null}
                         {institution.url ? (
                             <Pressable
-                                onPress={() => { Linking.openURL(institution.url).catch(() => {}); }}
+                                onPress={() => { void openExternalUrl(institution.url); }}
                                 accessibilityRole="link"
                                 accessibilityLabel={`Open ${institution.name} website`}
                                 hitSlop={8}
@@ -513,10 +542,9 @@ export default function CareerLibraryScreen() {
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [showUnlockSheet, setShowUnlockSheet] = useState(false);
-    // Full access = route said "unlocked"/"full" (cards, menu, search) or the live server check said "full".
-    const [serverFullAccess, setHasFullAccess] = useState(false);
-    const routeFullAccess = ['unlocked', 'full'].includes(String(params.accessStatus || '').toLowerCase());
-    const hasFullAccess = serverFullAccess || routeFullAccess;
+    // Full access only when the live server check says "full". The accessStatus route param is
+    // ignored: anyone can put it in a link, and a tab keeps it after a plan expires.
+    const [hasFullAccess, setHasFullAccess] = useState(false);
     // Same default as the user portal: "preview" until the live access check says otherwise. Opened
     // from the menu there are no route params, so starting at "locked" made every category look
     // locked (and skipped the preview session) until the module had been discovered.
@@ -785,8 +813,11 @@ export default function CareerLibraryScreen() {
         setLoading(true);
         setError('');
         setSelectedDetailSource(null);
+        // Every level shares one request id: a slower answer for an earlier tap is ignored and
+        // only the latest tap clears the spinner.
+        const requestId = ++categoryRequestIdRef.current;
+        const isStale = () => requestId !== categoryRequestIdRef.current;
         if (type === 'stream') {
-            const requestId = ++categoryRequestIdRef.current;
             setSelectedStream(item);
             setSelectedCategory(null);
             setSelectedSecondCategory(null);
@@ -838,6 +869,7 @@ export default function CareerLibraryScreen() {
             setIsCategoryFree(hasFullAccess || accessTier === 'preview' || accessTier === 'full');
             try {
                 const response = await getCareerLibraryNext(type, id);
+                if (isStale()) return;
                 const data = response ?? {};
                 const nextItems = Array.isArray(data?.data) ? data.data : [];
                 if (data.type === 'secondcategory') {
@@ -848,6 +880,7 @@ export default function CareerLibraryScreen() {
                 }
                 else if (data.type === 'details') {
                     const detailItems = await loadDetailItemsWithPreview({ type, id, item, nextItems, presetPreviewId });
+                    if (isStale()) return;
                     if (!detailItems) {
                         setLoading(false);
                         return;
@@ -867,10 +900,10 @@ export default function CareerLibraryScreen() {
                 }
             }
             catch (_fetchError) {
-                setError('Unable to load the next step. Please try again.');
+                if (!isStale()) setError('Unable to load the next step. Please try again.');
             }
             finally {
-                setLoading(false);
+                if (!isStale()) setLoading(false);
             }
             return;
         }
@@ -879,6 +912,7 @@ export default function CareerLibraryScreen() {
             setDetailReturnLevel('secondcategory');
             try {
                 const response = await getCareerLibraryNext(type, id);
+                if (isStale()) return;
                 const data = response ?? {};
                 const nextItems = Array.isArray(data?.data) ? data.data : [];
                 if (data.type === 'subcategory') {
@@ -888,6 +922,7 @@ export default function CareerLibraryScreen() {
                 }
                 else if (data.type === 'details') {
                     const detailItems = await loadDetailItemsWithPreview({ type, id, item, nextItems, presetPreviewId });
+                    if (isStale()) return;
                     if (!detailItems) {
                         setLoading(false);
                         return;
@@ -906,10 +941,10 @@ export default function CareerLibraryScreen() {
                 }
             }
             catch (_fetchError) {
-                setError('Unable to load the next step. Please try again.');
+                if (!isStale()) setError('Unable to load the next step. Please try again.');
             }
             finally {
-                setLoading(false);
+                if (!isStale()) setLoading(false);
             }
             return;
         }
@@ -918,43 +953,29 @@ export default function CareerLibraryScreen() {
             setDetailReturnLevel('subcategory');
             try {
                 const response = await getCareerLibraryNext(type, id);
+                if (isStale()) return;
                 const data = response ?? {};
                 const nextItems = Array.isArray(data?.data) ? data.data : [];
-                if (data.type === 'details') {
-                    const detailItems = await loadDetailItemsWithPreview({ type, id, item, nextItems, presetPreviewId });
-                    if (!detailItems) {
-                        setLoading(false);
-                        return;
-                    }
-                    setSelectedDetailSource(item);
-                    setDetails(detailItems);
-                    setCurrentLevel('details');
-                    if (item?.id != null) {
-                        registerFreeDetailAccess('career-library', String(item.id));
-                    }
+                // A specialization always opens its details, whatever type label the API sends, so
+                // every answer goes through the same preview gate (session + lock) as 'details'.
+                const detailItems = await loadDetailItemsWithPreview({ type, id, item, nextItems, presetPreviewId });
+                if (isStale()) return;
+                if (!detailItems) {
+                    setLoading(false);
+                    return;
                 }
-                else if (nextItems.length > 0) {
-                    setSelectedDetailSource(item);
-                    setDetails(nextItems);
-                    setCurrentLevel('details');
-                    if (item?.id != null) {
-                        registerFreeDetailAccess('career-library', String(item.id));
-                    }
-                }
-                else {
-                    setSelectedDetailSource(item);
-                    setDetails([]);
-                    setCurrentLevel('details');
-                    if (item?.id != null) {
-                        registerFreeDetailAccess('career-library', String(item.id));
-                    }
+                setSelectedDetailSource(item);
+                setDetails(detailItems);
+                setCurrentLevel('details');
+                if (item?.id != null) {
+                    registerFreeDetailAccess('career-library', String(item.id));
                 }
             }
             catch (_fetchError) {
-                setError('Unable to load the next step. Please try again.');
+                if (!isStale()) setError('Unable to load the next step. Please try again.');
             }
             finally {
-                setLoading(false);
+                if (!isStale()) setLoading(false);
             }
             return;
         }
@@ -989,7 +1010,7 @@ export default function CareerLibraryScreen() {
             setModuleStatus(liveMode);
             setHasFullAccess(liveMode === 'full');
         }
-        const full = routeFullAccess || liveMode === 'full' || (!liveMode && hasFullAccess);
+        const full = liveMode === 'full' || (!liveMode && hasFullAccess);
         const inPreview = !full && (liveMode ? liveMode === 'preview' : moduleStatus === 'preview');
         // The server decides in preview; ok:false means the unlock sheet is already shown.
         const previewGate = async (pageType, pageId, item) => {
@@ -1391,7 +1412,7 @@ export default function CareerLibraryScreen() {
         <Text className={`text-[13px] font-semibold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{exam?.examname || 'Exam'}</Text>
         <Text className={`text-[12px] ${preferences.darkMode ? 'text-gray-300' : 'text-gray-900'}`}>{[exam?.mode, exam?.duration, formatDate(exam?.exam_date)].filter(Boolean).join(' • ')}</Text>
       </View>
-      {exam?.url ? (<Pressable onPress={() => Linking.openURL(exam.url)} className="h-9 w-9 items-center justify-center rounded-full ml-2" style={{ borderWidth: 1, borderColor: '#f0e4e2' }}>
+      {exam?.url ? (<Pressable onPress={() => { void openExternalUrl(exam.url); }} className="h-9 w-9 items-center justify-center rounded-full ml-2" style={{ borderWidth: 1, borderColor: '#f0e4e2' }}>
           <Ionicons name="arrow-forward" size={16} color={palette.primary}/>
         </Pressable>) : null}
     </View>))}

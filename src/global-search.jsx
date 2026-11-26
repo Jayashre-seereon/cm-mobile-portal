@@ -279,6 +279,8 @@ export function GlobalSearch({ visible, onClose }) {
 
         setIsLoading(true);
         setError('');
+        // Results of the previous query must not stay visible (or tappable) while this one loads.
+        setData(EMPTY_DATA);
         const controller = new AbortController();
         const timer = setTimeout(async () => {
             try {
@@ -418,7 +420,7 @@ export function GlobalSearch({ visible, onClose }) {
         setOpeningKey(rowKey);
         try {
             const result = await openTarget(resolveSearchTarget(item), { onLocked: setLockedInfo, fromGlobalSearch: true, searchItem: item });
-            if (result !== 'locked') {
+            if (result === 'opened' || result === 'external') {
                 onClose?.();
             }
         }

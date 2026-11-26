@@ -94,81 +94,41 @@ export default function YourProfilingReport({
   const heading = pData.heading || 'YOUR PROFILING';
   const introParagraph = DEFAULT_INTRO;
 
+  // No sample values here: missing profiling data is shown as "-" / "not
+  // available" so a student never sees made-up results as their own.
+  // (Sample data for the demo report is passed in by the parent.)
+
   // 2. Stage Track
   const stageTrack = pData.stageTrack || {};
-  const currentStageNo = Number(stageTrack.currentStageNo || 3);
   const stages = DEFAULT_STAGES;
-  const currentStageName = stages[currentStageNo - 1]?.stageName || 'Discovering';
+  const stageNoFromCode = stages.find((s) => s.stageCode === stageTrack.currentStageCode)?.stageNo || 0;
+  const currentStageNo = Number(stageTrack.currentStageNo) || stageNoFromCode || 0;
+  const currentStageName = stages[currentStageNo - 1]?.stageName || stageTrack.currentStageName || '-';
 
   // 3. Risk Badge
-  const riskBadge = pData.riskBadge || {
-    text: 'Risk level: Low to Medium',
-    label: 'Low to Medium',
-    level: 2,
-    hexColor: '#4CAF50',
-  };
-  const riskStyle = getRiskBadgeStyle(riskBadge);
+  const riskBadge = pData.riskBadge || null;
+  const riskStyle = riskBadge
+    ? getRiskBadgeStyle(riskBadge)
+    : { pillBg: '#64748b', label: '-' };
 
   // 4. What it means
-  const whatItMeans =
-    pData.whatItMeans ||
-    'You know what you want to do. Now you need a clear path: which subjects, which exams, and which skills.';
+  const whatItMeans = pData.whatItMeans || 'Profiling results are not available for this report.';
 
   // 5. Your 5 Areas
   const your5Areas =
     Array.isArray(pData.your5Areas) && pData.your5Areas.length > 0
       ? pData.your5Areas
-      : [
-          {
-            domainCode: 'SA',
-            domainStudentFacingName: 'About Me',
-            score: 83,
-            stage: 'Future-Ready',
-            stageNo: 5,
-            label: 'About Me – Future-Ready',
-            meaning: 'You know yourself very well and can use this to choose your career.',
-          },
-          {
-            domainCode: 'CE',
-            domainStudentFacingName: 'Knowing About Careers',
-            score: 58,
-            stage: 'Exploring',
-            stageNo: 3,
-            label: 'Knowing About Careers – Exploring',
-            meaning: 'You are finding out about different careers.',
-          },
-          {
-            domainCode: 'DC',
-            domainStudentFacingName: 'Making a Choice',
-            score: 83,
-            stage: 'Future-Ready',
-            stageNo: 5,
-            label: 'Making a Choice – Future-Ready',
-            meaning: 'You are sure about your choice and it stays steady.',
-          },
-          {
-            domainCode: 'PP',
-            domainStudentFacingName: 'Knowing the Path',
-            score: 50,
-            stage: 'Exploring',
-            stageNo: 3,
-            label: 'Knowing the Path – Exploring',
-            meaning: 'You know some of the steps for the field you like.',
-          },
-          {
-            domainCode: 'CO',
-            domainStudentFacingName: 'Feeling Sure',
-            score: 75,
-            stage: 'Clarity',
-            stageNo: 4,
-            label: 'Feeling Sure – Clarity',
-            meaning: 'You feel confident about choosing your career.',
-          },
-        ];
+      : Object.keys(DOMAIN_CONFIG).map((domainCode) => ({
+          domainCode,
+          domainStudentFacingName: DOMAIN_CONFIG[domainCode].defaultName,
+          score: null,
+          stageNo: 0,
+          meaning: 'Not available for this report.',
+        }));
 
   // 6. Career Readiness Score (CRI)
   const criObj = pData.careerReadinessScore || {};
-  const criScore = Number(criObj.cri ?? 70);
+  const criScore = criObj.cri != null && Number.isFinite(Number(criObj.cri)) ? Number(criObj.cri) : '-';
   const criMaxScore = Number(criObj.maxScore ?? 100);
 
   // 7. Notes for You (Flags)
@@ -238,7 +198,7 @@ export default function YourProfilingReport({
               >
                 <View style={[styles.riskDot, { backgroundColor: riskStyle.pillBg }]} />
                 <Text style={[styles.pillText, { color: riskStyle.pillBg }]}>
-                  {riskBadge.text || `Risk level: ${riskStyle.label}`}
+                  {riskBadge?.text || `Risk level: ${riskStyle.label}`}
                 </Text>
               </View>
 
@@ -377,9 +337,7 @@ export default function YourProfilingReport({
               const code = area.domainCode || Object.keys(DOMAIN_CONFIG)[idx] || 'SA';
               const cfg = DOMAIN_CONFIG[code] || DOMAIN_CONFIG.SA;
               const domainName = area.domainStudentFacingName || cfg.defaultName;
-              const stageNum = Number(area.stageNo || 3);
-              const stageLabel = area.stage || area.label || 'Exploring';
-              const scoreVal = area.score !== undefined ? area.score : null;
+              const stageNum = Number(area.stageNo) || 0;
 
               return (
                 <View key={code || idx} style={styles.areaCard}>
@@ -409,7 +367,7 @@ export default function YourProfilingReport({
                           );
                         })}
                       </View>
-                      <Text style={styles.miniBarLabel}>{stageNum}/5</Text>
+                      <Text style={styles.miniBarLabel}>{stageNum > 0 ? stageNum : '-'}/5</Text>
                     </View>
                   </View>
 

@@ -1,41 +1,31 @@
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
-import { Animated, Text, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { getPlans } from '../src/api/planApi';
 import { useAppState } from '../src/app-state';
 import { AnimatedBackground } from '../src/animated-background';
-import { palette, subscriptions as fallbackSubscriptions } from '../src/careermap-data';
+import { palette } from '../src/careermap-data';
 import { AnimatedPressable } from '../src/careermap-ui';
 import { decodeReturnTarget } from '../src/subscription-flow';
 
+const HOME_ROUTE = '/(drawer)/(tabs)/';
+
 export default function PaymentSuccessScreen() {
-  const { planId, transactionId, returnTo } = useLocalSearchParams();
+  const { apiPlanId, transactionId, returnTo } = useLocalSearchParams();
   const { refreshSubscriptionData, preferences } = useAppState();
   const celebration = useRef(new Animated.Value(0)).current;
-  const [plans, setPlans] = useState(fallbackSubscriptions);
+  // 'verifying' -> 'confirmed' | 'not-found' | 'error'. Success is shown only for a subscription the
+  // backend reports as active for this plan, never just because the route was opened (deep links).
+  const [status, setStatus] = useState('verifying');
+  const [record, setRecord] = useState(null);
+  const [attempt, setAttempt] = useState(0);
 
-  const fallbackPlan = plans?.find?.((item) => item) || fallbackSubscriptions?.[0] || {
-    id: 'subscription',
-    name: 'Subscription Plan',
-    price: 'Paid plan',
-  };
-
-  const plan =
-    plans.find((item) => String(item.id) === String(planId)) ??
-    fallbackPlan;
-
-  const returnTarget = decodeReturnTarget(returnTo);
-
-  const validUntil = new Date(
-    new Date().setFullYear(new Date().getFullYear() + 1)
-  ).toLocaleDateString('en-IN', {
-    month: 'long',
-    year: 'numeric',
-  });
-
+  // decodeReturnTarget only accepts in-app '/(drawer)/...' screens.
+  const returnTarget = useMemo(() => decodeReturnTarget(returnTo), [returnTo]);
+  const wantedPlanId = typeof apiPlanId === 'string' ? apiPlanId.trim() : '';
+  const paymentRef = typeof transactionId === 'string' ? transactionId : '';
   const themed = {
     pageOverlay: preferences.darkMode ? 'rgba(5, 5, 5, 0.86)' : 'rgba(251, 247, 243, 0.82)',
     card: preferences.darkMode ? 'rgba(8, 8, 8, 0.94)' : 'rgba(255, 255, 255, 0.9)',
@@ -46,60 +36,94 @@ export default function PaymentSuccessScreen() {
     heroSurface: preferences.darkMode ? 'rgba(8, 8, 8, 0.94)' : 'rgba(246, 239, 235, 0.9)',
   };
 
+  // Runs once per attempt (refreshSubscriptionData has a stable identity), so no refetch loop.
   useEffect(() => {
-    void refreshSubscriptionData().catch(() => {});
-  }, [refreshSubscriptionData]);
-
-  useEffect(() => {
-    let isMounted = true;
-
-    const loadPlans = async () => {
+    let active = true;
+    setStatus('verifying');
+    (async () => {
       try {
-        const response = await getPlans();
-        if (isMounted && response.length > 0) {
-          setPlans(response);
-        }
+        const items = wantedPlanId ? await refreshSubscriptionData() : [];
+        if (!active) return;
+        const match = (items || []).find((item) => String(item?.backendPlanId || '') === wantedPlanId
+          && String(item?.status || '').toLowerCase() === 'active') || null;
+        setRecord(match);
+        setStatus(match ? 'confirmed' : 'not-found');
       }
-      catch (error) {
-        console.log('Plans fetch failed', error?.response?.data || error?.message || error);
+      catch {
+        if (active) setStatus('error');
       }
-    };
-
-    loadPlans();
-
+    })();
     return () => {
-      isMounted = false;
+      active = false;
     };
-  }, []);
+  }, [attempt, refreshSubscriptionData, wantedPlanId]);
 
   // animation
   useEffect(() => {
+    if (status !== 'confirmed') return;
     Animated.spring(celebration, {
       toValue: 1,
       useNativeDriver: true,
     }).start();
-  }, []);
+  }, [celebration, status]);
 
-  // auto redirect
+  // auto redirect, only after the subscription is confirmed active
   useEffect(() => {
+    if (status !== 'confirmed') return undefined;
     const timer = setTimeout(() => {
-      if (returnTarget) {
-        router.replace(returnTarget);
-        return;
-      }
-      router.replace('/(drawer)/(tabs)/');
+      router.replace(returnTarget || HOME_ROUTE);
     }, 3000);
 
     return () => clearTimeout(timer);
-  }, [returnTarget]);
+  }, [returnTarget, status]);
 
   const handleContinue = () => {
-    if (returnTarget) {
-      router.replace(returnTarget);
-      return;
-    }
-    router.replace('/(drawer)/(tabs)/');
+    router.replace(returnTarget || HOME_ROUTE);
   };
+
+  if (status !== 'confirmed') {
+    const title = status === 'verifying'
+      ? 'Verifying your payment...'
+      : status === 'error'
+        ? 'Could not check your subscription'
+        : 'We could not confirm a payment';
+    const body = status === 'verifying'
+      ? 'Please wait while we confirm your subscription.'
+      : status === 'error'
+        ? 'We could not reach the server to confirm your subscription. Please check your connection and try again.'
+        : `No active subscription was found for this payment. If you were charged, please check Profile > Subscription in a few minutes or contact support@careermap.in${paymentRef ? ` with payment id ${paymentRef}` : ''}.`;
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
+        <AnimatedBackground />
+        <View className="flex-1 justify-center gap-4 px-4 py-4">
+          <View className="items-center gap-3 rounded-[22px] border p-6" style={{ backgroundColor: themed.card, borderColor: themed.border }}>
+            {status === 'verifying' ? <ActivityIndicator size="large" color={palette.primary} /> : <Ionicons name="alert-circle-outline" size={36} color={palette.primary} />}
+            <Text className="text-center text-[20px] font-extrabold" style={{ color: themed.text }}>{title}</Text>
+            <Text className="text-center text-[13px] leading-5" style={{ color: themed.muted }}>{body}</Text>
+            {status !== 'verifying' ? (
+              <View className="w-full gap-2">
+                <AnimatedPressable className="rounded-[12px] bg-brand py-3" onPress={() => setAttempt((value) => value + 1)}>
+                  <Text className="text-center text-[14px] font-bold text-white">Check again</Text>
+                </AnimatedPressable>
+                <AnimatedPressable className="py-2" onPress={() => router.replace(HOME_ROUTE)}>
+                  <Text className="text-center text-[13px] font-bold text-brand">Go to home</Text>
+                </AnimatedPressable>
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  const planName = record?.subscriptionName || record?.planName || 'Subscription Plan';
+  const accessUntil = record?.expiryDate && record.expiryDate !== 'Expiry date not available' ? record.expiryDate : '';
+  const detailRows = [
+    ['Plan', planName],
+    ['Amount', record?.price && record.price !== 'Subscription active' ? record.price : ''],
+    ['Transaction ID', paymentRef],
+    ['Validity', [record?.validity, accessUntil ? `until ${accessUntil}` : ''].filter(Boolean).join(' ')],
+  ].filter(([, value]) => value);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: 'transparent' }}>
@@ -162,7 +186,7 @@ export default function PaymentSuccessScreen() {
               color: palette.primary,
             }}
           >
-            {plan?.name || 'Subscription Plan'}
+            {planName}
           </Text>
         </View>
 
@@ -173,17 +197,12 @@ export default function PaymentSuccessScreen() {
             borderColor: themed.border,
           }}
         >
-          {[
-            ['Plan', plan?.name || 'Subscription Plan'],
-            ['Amount', plan?.price || 'Paid plan'],
-            ['Transaction ID', transactionId ?? 'TXN00000000'],
-            ['Validity', `1 Year (until ${validUntil})`],
-          ].map(([label, value], i) => (
+          {detailRows.map(([label, value], i) => (
             <View
               key={label}
               className="flex-row justify-between py-[6px]"
               style={{
-                borderBottomWidth: i !== 3 ? 1 : 0,
+                borderBottomWidth: i !== detailRows.length - 1 ? 1 : 0,
                 borderColor: themed.border,
               }}
             >

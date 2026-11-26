@@ -2,8 +2,11 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  AppState,
+  BackHandler,
   Image,
   Modal,
+  Platform,
   SafeAreaView,
   ScrollView,
   Text,
@@ -11,8 +14,10 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { router, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useIsFocused } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { File, Paths } from 'expo-file-system';
 import { useAppState } from '../../src/app-state';
 import {
   getAttemptQuestions,
@@ -28,15 +33,34 @@ import {
   TOTAL_ASSESSMENT_QUESTIONS,
   getDomainMeta,
 } from '../../src/features/assessment/data/assessmentConstants';
-import { FALLBACK_SECTIONS } from '../../src/features/assessment/data/fallbackQuestions';
 
 const APTITUDE_TIME_LIMIT_SECONDS = 30 * 60;
 
+// Aptitude timer start times are persisted so the countdown survives an app restart
+// (localStorage on web, a small JSON file in the document directory on native).
+const NATIVE_TIMER_FILE = 'careermap-aptitude-timers.json';
 const timerMemoryStore = {};
+
+function readNativeTimers() {
+  try {
+    const file = new File(Paths.document, NATIVE_TIMER_FILE);
+    if (!file.exists) return {};
+    const parsed = JSON.parse(file.textSync() || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_e) {
+    return {};
+  }
+}
+
 function getTimerStartedAt(key) {
   try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const val = window.localStorage.getItem(key);
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const val = window.localStorage.getItem(key);
+        if (val) return Number(val);
+      }
+    } else {
+      const val = readNativeTimers()[key];
       if (val) return Number(val);
     }
   } catch (_e) {}
@@ -44,12 +68,19 @@ function getTimerStartedAt(key) {
 }
 
 function setTimerStartedAt(key, val) {
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem(key, String(val));
-    }
-  } catch (_e) {}
   timerMemoryStore[key] = val;
+  try {
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.localStorage) {
+        window.localStorage.setItem(key, String(val));
+      }
+      return;
+    }
+    const timers = { ...readNativeTimers(), [key]: val };
+    const file = new File(Paths.document, NATIVE_TIMER_FILE);
+    if (!file.exists) file.create();
+    file.write(JSON.stringify(timers));
+  } catch (_e) {}
 }
 
 function isAptitudeSection(section, index) {
@@ -65,18 +96,48 @@ function isAptitudeSection(section, index) {
   return key.includes('apt') || key.includes('cognit') || getDomainMeta(section, index)?.id === 'aptitude';
 }
 
+function hasAnswerValue(ans) {
+  return Boolean(
+    ans &&
+    ((ans.likertValue !== undefined && ans.likertValue !== null) ||
+      (ans.selectedOptionId !== undefined && ans.selectedOptionId !== null) ||
+      (ans.optionKey !== undefined && ans.optionKey !== null))
+  );
+}
+
+function toSavePayload(questionId, ans) {
+  return {
+    questionId,
+    ...(ans.likertValue !== undefined && ans.likertValue !== null ? { likertValue: ans.likertValue } : {}),
+    ...(ans.selectedOptionId !== undefined && ans.selectedOptionId !== null ? { selectedOptionId: ans.selectedOptionId } : {}),
+    ...(ans.optionKey !== undefined && ans.optionKey !== null ? { optionKey: ans.optionKey } : {}),
+  };
+}
+
+function buildBatchList(answerMap) {
+  return Object.entries(answerMap)
+    .filter(([, ans]) => hasAnswerValue(ans))
+    .map(([qId, ans]) => toSavePayload(qId, ans));
+}
+
+function getErrorMessage(err, fallback) {
+  return err?.response?.data?.message || err?.message || fallback;
+}
+
 export default function AssessmentAttemptScreen() {
   const { attemptId } = useLocalSearchParams();
   const { preferences } = useAppState();
   const darkMode = preferences.darkMode;
+  const isFocused = useIsFocused();
 
   const [loading, setLoading] = useState(true);
   const [sections, setSections] = useState([]);
   const [currentSectionIndex, setCurrentSectionIndex] = useState(0);
+  const [loadError, setLoadError] = useState('');
 
   // Map of answers: { [questionId]: { likertValue?: number, selectedOptionId?: string, optionKey?: string } }
   const [answers, setAnswers] = useState({});
-  const [saveStatus, setSaveStatus] = useState('saved'); // 'saving' | 'saved'
+  const [saveStatus, setSaveStatus] = useState('saved'); // 'saving' | 'saved' | 'error'
 
   // Submission state & modal
   const [isSubmitModalVisible, setIsSubmitModalVisible] = useState(false);
@@ -93,25 +154,79 @@ export default function AssessmentAttemptScreen() {
   const [aptitudeStarted, setAptitudeStarted] = useState(false);
   const [showAptitudeExpiredModal, setShowAptitudeExpiredModal] = useState(false);
 
+  // Answers changed locally but not yet confirmed by the server: { [questionId]: entry }
   const pendingSavesRef = useRef({});
   const saveTimeoutRef = useRef(null);
+  // Saves run one after another so an older request can never overwrite a newer answer.
+  const saveChainRef = useRef(Promise.resolve());
+  const submittingRef = useRef(false);
+  const loadRequestRef = useRef(0);
+  // Set after a submit or a redirect to the report; the next focus re-checks the attempt status
+  // so a completed attempt kept mounted by the drawer never shows editable questions again.
+  const needsReloadRef = useRef(false);
   const scrollViewRef = useRef(null);
   const aptitudeTimerKey = `assessment:${attemptId}:aptitude-started-at`;
 
   const loadTestQuestions = useCallback(async () => {
+    const requestId = loadRequestRef.current + 1;
+    loadRequestRef.current = requestId;
+
+    // This drawer screen stays mounted between attempts, so reset every per-attempt value.
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    pendingSavesRef.current = {};
+    submittingRef.current = false;
     setLoading(true);
+    setLoadError('');
+    setSections([]);
+    setAnswers({});
+    setCurrentSectionIndex(0);
+    setSaveStatus('saved');
+    setIsSubmitModalVisible(false);
+    setSubmitting(false);
+    setAccessBlockedInfo({ visible: false, reason: '', message: '' });
+    setAptitudeStarted(false);
+    setAptitudeExpired(false);
+    setAptitudeTimeLeft(APTITUDE_TIME_LIMIT_SECONDS);
+    setShowAptitudeExpiredModal(false);
+
+    let redirecting = false;
     try {
+      if (!attemptId) {
+        throw new Error('No assessment attempt was selected. Please start the assessment again.');
+      }
+
       let loadedSections = [];
       let initialAnswers = {};
 
       const data = await getAttemptQuestions(attemptId);
+      if (loadRequestRef.current !== requestId) return;
+
+      const attemptStatus = String(data?.status || '').toLowerCase();
+      if (attemptStatus === 'completed') {
+        // A finished attempt must never be editable again: open its report instead.
+        redirecting = true;
+        needsReloadRef.current = true;
+        router.replace({
+          pathname: '/(drawer)/assessment-report',
+          params: { attemptId: String(attemptId) },
+        });
+        return;
+      }
+      if (attemptStatus && attemptStatus !== 'in_progress') {
+        throw new Error(
+          'This assessment attempt is no longer active and cannot be continued. Please start a new attempt from the Assessment tab.'
+        );
+      }
 
       if (data && Array.isArray(data.sections) && data.sections.length > 0) {
         loadedSections = data.sections;
       } else if (Array.isArray(data) && data.length > 0) {
         loadedSections = data;
       } else {
-        loadedSections = FALLBACK_SECTIONS;
+        throw new Error('No questions are available for this assessment attempt.');
       }
 
       // Merge pre-saved answers if any
@@ -138,6 +253,7 @@ export default function AssessmentAttemptScreen() {
       setSections(loadedSections);
       setAnswers(initialAnswers);
     } catch (err) {
+      if (loadRequestRef.current !== requestId) return;
       console.warn('Could not fetch remote questions:', err?.message);
       const data = err.response?.data;
       if (
@@ -155,18 +271,45 @@ export default function AssessmentAttemptScreen() {
         });
         return;
       }
-      setSections(FALLBACK_SECTIONS);
+      // Same as the user portal: show the real error with Retry / Back instead of a local copy of the test.
+      setSections([]);
+      setLoadError(getErrorMessage(err, 'Could not load the assessment questions.'));
     } finally {
-      setLoading(false);
+      // Keep the loading view while redirecting to the report so the old questions never flash.
+      if (loadRequestRef.current === requestId && !redirecting) setLoading(false);
     }
   }, [attemptId]);
 
   useEffect(() => {
+    needsReloadRef.current = false;
     loadTestQuestions();
   }, [loadTestQuestions]);
 
+  useFocusEffect(
+    useCallback(() => {
+      if (needsReloadRef.current) {
+        needsReloadRef.current = false;
+        loadTestQuestions();
+      }
+    }, [loadTestQuestions])
+  );
+
+  // Active section
+  const activeSection = useMemo(() => {
+    if (!sections || sections.length === 0) return null;
+    return sections[currentSectionIndex] || sections[0];
+  }, [sections, currentSectionIndex]);
+
+  const activeDomainMeta = useMemo(() => {
+    return getDomainMeta(activeSection, currentSectionIndex);
+  }, [activeSection, currentSectionIndex]);
+
+  const isAptitudeActive = Boolean(activeSection) && isAptitudeSection(activeSection, currentSectionIndex);
+
+  // The aptitude countdown starts the first time the aptitude section is opened (not when the
+  // test loads) and only ticks while this screen is focused and the aptitude section is shown.
   useEffect(() => {
-    if (loading || !sections.some((sec, idx) => isAptitudeSection(sec, idx))) return;
+    if (loading || !attemptId || !isFocused || !isAptitudeActive) return;
 
     let startedAt = getTimerStartedAt(aptitudeTimerKey);
     if (!startedAt) {
@@ -185,17 +328,7 @@ export default function AssessmentAttemptScreen() {
     updateTime();
     const interval = setInterval(updateTime, 1000);
     return () => clearInterval(interval);
-  }, [sections, aptitudeTimerKey, loading]);
-
-  // Active section
-  const activeSection = useMemo(() => {
-    if (!sections || sections.length === 0) return null;
-    return sections[currentSectionIndex] || sections[0];
-  }, [sections, currentSectionIndex]);
-
-  const activeDomainMeta = useMemo(() => {
-    return getDomainMeta(activeSection, currentSectionIndex);
-  }, [activeSection, currentSectionIndex]);
+  }, [aptitudeTimerKey, loading, attemptId, isFocused, isAptitudeActive]);
 
   // Overall statistics
   const totalQuestionsCount = useMemo(() => {
@@ -244,21 +377,102 @@ export default function AssessmentAttemptScreen() {
     });
   }, [sections, answers]);
 
+  // Queue a save task behind any save already in flight.
+  function runSaveTask(task) {
+    const run = saveChainRef.current.then(task, task);
+    saveChainRef.current = run.catch(() => {});
+    return run;
+  }
+
+  // Save every queued answer (not just the last tapped one). Entries that fail stay queued and
+  // are retried on the next answer, section switch, app foreground or the "tap to retry" button.
+  function flushPendingSaves() {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    const targetAttemptId = attemptId;
+    return runSaveTask(async () => {
+      const entries = Object.values(pendingSavesRef.current);
+      if (entries.length === 0) return true;
+      pendingSavesRef.current = {};
+      setSaveStatus('saving');
+      try {
+        if (entries.length === 1) {
+          await saveAttemptAnswer(targetAttemptId, entries[0]);
+        } else {
+          await saveBatchAttemptAnswers(
+            targetAttemptId,
+            entries.map((entry) => toSavePayload(entry.questionId, entry))
+          );
+        }
+        if (Object.keys(pendingSavesRef.current).length === 0) setSaveStatus('saved');
+        return true;
+      } catch (e) {
+        console.warn('Auto-save failed:', e?.message);
+        // Re-queue (newer answers for the same question win)
+        entries.forEach((entry) => {
+          if (!pendingSavesRef.current[entry.questionId]) pendingSavesRef.current[entry.questionId] = entry;
+        });
+        setSaveStatus('error');
+        return false;
+      }
+    });
+  }
+
+  // Full re-sync of every answer (used on section switch and exit).
+  function syncAllAnswers(answerMap) {
+    const batchList = buildBatchList(answerMap);
+    if (batchList.length === 0) return Promise.resolve(true);
+    const included = { ...pendingSavesRef.current };
+    const targetAttemptId = attemptId;
+    return runSaveTask(async () => {
+      try {
+        await saveBatchAttemptAnswers(targetAttemptId, batchList);
+        Object.keys(included).forEach((key) => {
+          if (pendingSavesRef.current[key] === included[key]) delete pendingSavesRef.current[key];
+        });
+        if (Object.keys(pendingSavesRef.current).length === 0) setSaveStatus('saved');
+        return true;
+      } catch (err) {
+        console.warn('Batch save sync:', err?.message);
+        setSaveStatus('error');
+        return false;
+      }
+    });
+  }
+
+  const flushRef = useRef(flushPendingSaves);
+  flushRef.current = flushPendingSaves;
+
+  // Flush unsent answers when the app goes to the background, retry them when it comes back,
+  // and flush once more if the screen unmounts.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (Object.keys(pendingSavesRef.current).length === 0) return;
+      if (nextState === 'background' || nextState === 'inactive' || nextState === 'active') {
+        flushRef.current?.();
+      }
+    });
+    return () => {
+      subscription.remove();
+      if (Object.keys(pendingSavesRef.current).length > 0) flushRef.current?.();
+    };
+  }, []);
+
   // Answer selection with debounced auto-save
   function handleSelectAnswer(questionId, { likertValue, selectedOptionId, optionKey }) {
+    if (submittingRef.current) return;
     if (isAptitudeSection(activeSection, currentSectionIndex) && aptitudeExpired) return;
 
     setSaveStatus('saving');
 
-    const updatedAnswers = {
-      ...answers,
-      [questionId]: {
-        ...(likertValue !== undefined ? { likertValue } : {}),
-        ...(selectedOptionId !== undefined ? { selectedOptionId } : {}),
-        ...(optionKey !== undefined ? { optionKey } : {}),
-      },
+    const nextAnswer = {
+      ...(likertValue !== undefined ? { likertValue } : {}),
+      ...(selectedOptionId !== undefined ? { selectedOptionId } : {}),
+      ...(optionKey !== undefined ? { optionKey } : {}),
     };
-    setAnswers(updatedAnswers);
+    setAnswers((prev) => ({ ...prev, [questionId]: nextAnswer }));
 
     pendingSavesRef.current[questionId] = {
       questionId,
@@ -271,18 +485,9 @@ export default function AssessmentAttemptScreen() {
       clearTimeout(saveTimeoutRef.current);
     }
 
-    saveTimeoutRef.current = setTimeout(async () => {
-      try {
-        await saveAttemptAnswer(attemptId, {
-          questionId,
-          likertValue,
-          selectedOptionId,
-          optionKey,
-        });
-        setSaveStatus('saved');
-      } catch (_e) {
-        setSaveStatus('saved');
-      }
+    saveTimeoutRef.current = setTimeout(() => {
+      saveTimeoutRef.current = null;
+      flushPendingSaves();
     }, 350);
   }
 
@@ -290,16 +495,7 @@ export default function AssessmentAttemptScreen() {
   function handleSwitchSection(newIndex) {
     if (newIndex < 0 || newIndex >= sections.length) return;
 
-    const batchList = Object.entries(answers).map(([qId, ans]) => ({
-      questionId: qId,
-      ...(ans.likertValue !== undefined && ans.likertValue !== null ? { likertValue: ans.likertValue } : {}),
-      ...(ans.selectedOptionId !== undefined && ans.selectedOptionId !== null ? { selectedOptionId: ans.selectedOptionId } : {}),
-      ...(ans.optionKey !== undefined && ans.optionKey !== null ? { optionKey: ans.optionKey } : {}),
-    }));
-
-    if (batchList.length > 0) {
-      saveBatchAttemptAnswers(attemptId, batchList).catch(() => {});
-    }
+    syncAllAnswers(answers);
 
     setCurrentSectionIndex(newIndex);
     scrollViewRef.current?.scrollTo({ y: 0, animated: true });
@@ -331,21 +527,52 @@ export default function AssessmentAttemptScreen() {
     return list;
   }, [sections, answers]);
 
-  // Final submission
+  // Optional aptitude questions left blank (they score 0), shown on the submit sheet.
+  const skippedAptitude = useMemo(() => {
+    let count = 0;
+    let firstSectionIndex = -1;
+    sections.forEach((sec, sIdx) => {
+      if (!isAptitudeSection(sec, sIdx)) return;
+      const qList = Array.isArray(sec.questions) ? sec.questions : [];
+      qList.forEach((q) => {
+        if (!hasAnswerValue(answers[q.id])) {
+          count += 1;
+          if (firstSectionIndex === -1) firstSectionIndex = sIdx;
+        }
+      });
+    });
+    return { count, firstSectionIndex };
+  }, [sections, answers]);
+
+  // Final submission: only a confirmed save + successful submit opens the report.
   async function handleSubmitTest() {
+    if (submittingRef.current) return;
     if (unansweredQuestions.length > 0) return;
+    submittingRef.current = true;
     setIsSubmitModalVisible(false);
     setSubmitting(true);
 
     try {
       setSubmitStepText('Saving all responses...');
-      const batchList = Object.entries(answers).map(([qId, ans]) => ({
-        questionId: qId,
-        ...(ans.likertValue !== undefined && ans.likertValue !== null ? { likertValue: ans.likertValue } : {}),
-        ...(ans.selectedOptionId !== undefined && ans.selectedOptionId !== null ? { selectedOptionId: ans.selectedOptionId } : {}),
-        ...(ans.optionKey !== undefined && ans.optionKey !== null ? { optionKey: ans.optionKey } : {}),
-      }));
-      await saveBatchAttemptAnswers(attemptId, batchList).catch(() => {});
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+      // Let any autosave already in flight finish first.
+      await saveChainRef.current;
+
+      const batchList = buildBatchList(answers);
+      if (batchList.length > 0) {
+        const saveResult = await saveBatchAttemptAnswers(attemptId, batchList);
+        const savedCount = Number(saveResult?.savedCount);
+        if (Number.isFinite(savedCount) && savedCount < batchList.length) {
+          throw new Error(
+            `Only ${savedCount} of ${batchList.length} answers could be saved. Please check your connection and try again.`
+          );
+        }
+      }
+      pendingSavesRef.current = {};
+      setSaveStatus('saved');
 
       setSubmitStepText('Evaluating Personal Profiling & Career Planning Track...');
       await new Promise((r) => setTimeout(r, 500));
@@ -354,45 +581,83 @@ export default function AssessmentAttemptScreen() {
       await new Promise((r) => setTimeout(r, 500));
 
       setSubmitStepText('Calculating Career Clusters & Readiness Score...');
-      await submitAssessmentAttempt(attemptId).catch(() => {});
+      const result = await submitAssessmentAttempt(attemptId);
+      if (!result) {
+        throw new Error('The server did not return your assessment result. Please try again.');
+      }
 
       setSubmitStepText('Generating your Career Compass Report...');
       await new Promise((r) => setTimeout(r, 500));
 
+      needsReloadRef.current = true;
       router.replace({
         pathname: '/(drawer)/assessment-report',
         params: { attemptId: String(attemptId) },
       });
     } catch (err) {
-      console.warn('Submit test note:', err?.message);
-      router.replace({
-        pathname: '/(drawer)/assessment-report',
-        params: { attemptId: String(attemptId) },
-      });
+      console.warn('Submit test failed:', err?.message);
+      // Stay on the test with all answers kept; only a successful submit navigates to the report.
+      Alert.alert(
+        'Could not submit your assessment',
+        getErrorMessage(err, 'Could not submit your assessment. Please try again.'),
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Retry', onPress: () => handleSubmitRef.current?.() },
+        ]
+      );
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   }
+  const handleSubmitRef = useRef(handleSubmitTest);
+  handleSubmitRef.current = handleSubmitTest;
 
-  function handleExit() {
-    try {
-      const batchList = Object.entries(answers).map(([qId, ans]) => ({
-        questionId: qId,
-        ...(ans.likertValue !== undefined && ans.likertValue !== null ? { likertValue: ans.likertValue } : {}),
-        ...(ans.selectedOptionId !== undefined && ans.selectedOptionId !== null ? { selectedOptionId: ans.selectedOptionId } : {}),
-        ...(ans.optionKey !== undefined && ans.optionKey !== null ? { optionKey: ans.optionKey } : {}),
-      }));
-      if (batchList.length > 0) {
-        saveBatchAttemptAnswers(attemptId, batchList).catch(() => {});
-      }
-    } catch (_e) {}
-
+  function leaveAssessment() {
     if (router.canGoBack()) {
       router.back();
     } else {
       router.replace('/(drawer)/(tabs)/assessment');
     }
   }
+
+  // Attempts cannot be resumed, so confirm before leaving once anything has been answered.
+  function handleExit() {
+    if (submittingRef.current) return;
+    if (loading || loadError || accessBlockedInfo.visible || totalAnsweredCount === 0) {
+      leaveAssessment();
+      return;
+    }
+    Alert.alert(
+      'Exit assessment?',
+      'Your progress in this attempt cannot be resumed. If you exit now you will have to start a new attempt from question 1. Exit anyway?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Exit',
+          style: 'destructive',
+          onPress: () => {
+            // Best-effort final save; the attempt cannot be resumed so do not block leaving on it.
+            syncAllAnswers(answers);
+            leaveAssessment();
+          },
+        },
+      ]
+    );
+  }
+  const handleExitRef = useRef(handleExit);
+  handleExitRef.current = handleExit;
+
+  // Android hardware back / back gesture goes through the same confirmation as the Exit button.
+  useFocusEffect(
+    useCallback(() => {
+      const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+        handleExitRef.current?.();
+        return true;
+      });
+      return () => subscription.remove();
+    }, [])
+  );
 
   const cardBg = darkMode ? '#121214' : '#ffffff';
   const borderColor = darkMode ? '#222226' : '#e8dfda';
@@ -409,6 +674,73 @@ export default function AssessmentAttemptScreen() {
         <Text style={{ color: subtextColor, fontSize: 12, marginTop: 4 }}>
           Preparing questions and pre-saved responses
         </Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: darkMode ? '#070709' : '#faf6f3', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <View
+          style={{
+            backgroundColor: cardBg,
+            borderRadius: 24,
+            padding: 24,
+            width: '100%',
+            maxWidth: 380,
+            borderWidth: 1,
+            borderColor,
+          }}
+        >
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <View
+              style={{
+                backgroundColor: '#fef3c7',
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <Ionicons name="warning-outline" size={24} color="#b45309" />
+            </View>
+            <Text style={{ color: textColor, fontSize: 18, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800', flex: 1 }}>
+              Could not load the assessment
+            </Text>
+          </View>
+
+          <Text style={{ color: textColor, fontSize: 13, lineHeight: 20, marginTop: 4 }}>
+            {loadError}
+          </Text>
+
+          <View style={{ marginTop: 22, gap: 10 }}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={loadTestQuestions}
+              style={{ backgroundColor: '#8C1814', borderRadius: 14, paddingVertical: 13, alignItems: 'center' }}
+            >
+              <Text style={{ color: '#ffffff', fontSize: 14, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>
+                Retry
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={() => router.replace('/(drawer)/(tabs)/assessment')}
+              style={{
+                backgroundColor: darkMode ? '#1c1c20' : '#f1f5f9',
+                borderRadius: 14,
+                paddingVertical: 12,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ color: subtextColor, fontSize: 13, fontFamily: 'Poppins_700Bold', fontWeight: '700' }}>
+                Back to Assessment
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </SafeAreaView>
     );
   }
@@ -550,7 +882,6 @@ export default function AssessmentAttemptScreen() {
 
   const isLastSection = currentSectionIndex === sections.length - 1;
   const currentSectionQuestions = activeSection?.questions || [];
-  const isAptitudeActive = isAptitudeSection(activeSection, currentSectionIndex);
   const aptitudeTimerLabel = `${String(Math.floor(aptitudeTimeLeft / 60)).padStart(2, '0')}:${String(aptitudeTimeLeft % 60).padStart(2, '0')}`;
 
   return (
@@ -626,6 +957,18 @@ export default function AssessmentAttemptScreen() {
                   <ActivityIndicator size="small" color="#f59e0b" />
                   <Text style={{ color: '#f59e0b', fontSize: 10, fontFamily: 'Poppins_700Bold', fontWeight: '700' }}>Saving...</Text>
                 </>
+              ) : saveStatus === 'error' ? (
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                  onPress={() => flushPendingSaves()}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                >
+                  <Ionicons name="alert-circle" size={13} color="#dc2626" />
+                  <Text style={{ color: '#dc2626', fontSize: 10, fontFamily: 'Poppins_700Bold', fontWeight: '700' }}>
+                    Not saved - tap to retry
+                  </Text>
+                </TouchableOpacity>
               ) : (
                 <>
                   <Ionicons name="checkmark-circle" size={13} color="#10b981" />
@@ -876,8 +1219,10 @@ export default function AssessmentAttemptScreen() {
                 >
                   {aptitudeExpired
                     ? 'Aptitude Time Expired'
+                    : aptitudeTimeLeft === 0
+                    ? 'Suggested Time Is Up'
                     : aptitudeTimeLeft <= 300
-                    ? 'Warning: < 5 Minutes Left'
+                    ? 'Less Than 5 Minutes Suggested Time Left'
                     : '30-Minute Timed Section'}
                 </Text>
                 <Text
@@ -891,7 +1236,7 @@ export default function AssessmentAttemptScreen() {
                 >
                   {aptitudeExpired
                     ? 'The 30-minute time limit for this section has ended. Responses are locked and auto-saved.'
-                    : 'This section has a strict 30-minute time limit. Solve as many questions as you can.'}
+                    : 'Aim to finish this section in about 30 minutes. The timer started when you opened this section and is a guide only - you can keep answering after it reaches zero.'}
                 </Text>
               </View>
             </View>
@@ -939,20 +1284,21 @@ export default function AssessmentAttemptScreen() {
             const questionNumber = qIdx + 1;
             const currentAnswer = answers[question.id] || {};
 
-            // Determine if question belongs specifically to Section 1 (Personal Profiling / CRI)
+            // Decide by section only: facet codes are shared across domains (e.g. Work Values
+            // "CO" = Conservation vs profiling "CO" = Confidence), so they must not be used here.
             const isProfilingQuestion =
               activeSection?.code === 'profiling' ||
               activeSection?.id === 'profiling' ||
               activeSection?.key === 'profiling' ||
-              activeDomainMeta?.id === 'profiling' ||
-              ['SA', 'CE', 'DC', 'PP', 'CO', 'SP'].includes(question.facet) ||
-              (typeof question.code === 'string' && /^(SA|CE|DC|PP|CO|SP)\d*/i.test(question.code));
+              activeDomainMeta?.id === 'profiling';
 
             // Section 1 Question 16 is single choice SP
             const isSP =
-              question.code === 'SP' ||
-              question.facet === 'SP' ||
-              (isProfilingQuestion && (questionNumber === 16 || question.type === 'single_choice'));
+              isProfilingQuestion &&
+              (question.code === 'SP' ||
+                question.facet === 'SP' ||
+                questionNumber === 16 ||
+                question.type === 'single_choice');
 
             const isSingleChoice =
               isSP ||
@@ -1486,7 +1832,7 @@ export default function AssessmentAttemptScreen() {
 
                 <View style={{ gap: 8, marginTop: 6 }}>
                  <TouchableOpacity
-  disabled={unansweredQuestions.length > 0}
+  disabled={unansweredQuestions.length > 0 || submitting}
   onPress={handleSubmitTest}
   activeOpacity={0.85}
   style={{
@@ -1527,14 +1873,47 @@ export default function AssessmentAttemptScreen() {
             ) : (
               <View style={{ alignItems: 'center', paddingVertical: 10 }}>
                 <Text style={{ fontSize: 36 }}>🌟</Text>
-                <Text style={{ color: textColor, fontSize: 16, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800', marginTop: 8 }}>
-                  All {totalQuestionsCount} Questions Answered!
+                <Text style={{ color: textColor, fontSize: 16, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800', marginTop: 8, textAlign: 'center' }}>
+                  {skippedAptitude.count > 0
+                    ? `${totalAnsweredCount} of ${totalQuestionsCount} Questions Answered`
+                    : `All ${totalQuestionsCount} Questions Answered!`}
                 </Text>
-                <Text style={{ color: subtextColor, fontSize: 12, textAlign: 'center', marginTop: 4 }}>
-                  Your responses are complete. Click confirm to calculate your Career Compass profile.
-                </Text>
+                {skippedAptitude.count > 0 ? (
+                  <View
+                    style={{
+                      backgroundColor: darkMode ? '#3b2a0a' : '#fffbeb',
+                      borderWidth: 1,
+                      borderColor: '#fcd34d',
+                      borderRadius: 12,
+                      padding: 10,
+                      marginTop: 10,
+                      width: '100%',
+                    }}
+                  >
+                    <Text style={{ color: darkMode ? '#fde68a' : '#92400e', fontSize: 12, lineHeight: 17, textAlign: 'center' }}>
+                      {skippedAptitude.count} aptitude {skippedAptitude.count === 1 ? 'question is' : 'questions are'} unanswered. Skipped aptitude questions score 0.
+                    </Text>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={() => {
+                        setIsSubmitModalVisible(false);
+                        handleSwitchSection(skippedAptitude.firstSectionIndex);
+                      }}
+                      style={{ alignSelf: 'center', marginTop: 6, paddingVertical: 4, paddingHorizontal: 10 }}
+                    >
+                      <Text style={{ color: '#9a2119', fontSize: 12, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>
+                        Review Aptitude →
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <Text style={{ color: subtextColor, fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+                    Your responses are complete. Click confirm to calculate your Career Compass profile.
+                  </Text>
+                )}
 
                 <TouchableOpacity
+                  disabled={submitting}
                   onPress={handleSubmitTest}
                   style={{
                     backgroundColor: '#10b981',

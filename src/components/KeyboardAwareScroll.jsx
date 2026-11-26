@@ -34,12 +34,26 @@ export default function KeyboardAwareScroll({
     const contentHeightRef = useRef(0);
     const keyboardTopRef = useRef(null); // window y of the keyboard's top edge, null while hidden
     const handledInputRef = useRef(null);
-    const timersRef = useRef([]);
-    const [pad, setPad] = useState(0);
+    // Pending timers only: each id is removed once it fires, so the set never grows on long forms.
+    const timersRef = useRef(new Set());
+    const mountedRef = useRef(true);
+    const [pad, setPadState] = useState(0);
+
+    // measureInWindow callbacks can arrive after the screen closed: never set state then.
+    const setPad = useCallback((value) => {
+        if (mountedRef.current) {
+            setPadState(value);
+        }
+    }, []);
 
     const later = useCallback((fn, ms) => {
-        const id = setTimeout(fn, ms);
-        timersRef.current.push(id);
+        const id = setTimeout(() => {
+            timersRef.current.delete(id);
+            if (mountedRef.current) {
+                fn();
+            }
+        }, ms);
+        timersRef.current.add(id);
     }, []);
 
     const measureScroll = useCallback((done) => {
@@ -62,7 +76,7 @@ export default function KeyboardAwareScroll({
             const overlap = Math.max(0, Math.round(top + height - keyboardTop));
             setPad(overlap > 0 ? overlap + SAFETY : 0);
         });
-    }, [measureScroll]);
+    }, [measureScroll, setPad]);
 
     // Moves the focused field (and what is under it) above the keyboard.
     const revealFocusedField = useCallback(() => {
@@ -74,6 +88,9 @@ export default function KeyboardAwareScroll({
         handledInputRef.current = input;
         measureScroll(({ top: scrollTop, height: scrollHeight }) => {
             input.measureInWindow((_x, inputWindowTop, _width, inputHeight) => {
+                if (!mountedRef.current) {
+                    return;
+                }
                 const visibleHeight = Math.min(scrollTop + scrollHeight, keyboardTop - SAFETY) - scrollTop;
                 const currentY = scrollYRef.current;
                 const inputTop = inputWindowTop - scrollTop + currentY; // position inside the scroll content
@@ -97,6 +114,7 @@ export default function KeyboardAwareScroll({
     }, [measureScroll]);
 
     useEffect(() => {
+        mountedRef.current = true;
         const timers = timersRef.current;
         const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
         const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
@@ -121,9 +139,11 @@ export default function KeyboardAwareScroll({
         return () => {
             showSub.remove();
             hideSub.remove();
+            mountedRef.current = false;
             timers.forEach(clearTimeout);
+            timers.clear();
         };
-    }, [later, revealFocusedField, updatePad]);
+    }, [later, revealFocusedField, setPad, updatePad]);
 
     return (
         <ScrollView

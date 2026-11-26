@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -1023,6 +1023,7 @@ export default function AssessmentReportScreen() {
 
   const [loading, setLoading] = useState(true);
   const [reportData, setReportData] = useState(null);
+  const [loadError, setLoadError] = useState('');
   const [pageModalVisible, setPageModalVisible] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -1045,11 +1046,18 @@ const totalH = 32 * (PAGE_H + PAGE_GAP);
     pageOffsets.current[pageNum] = e.nativeEvent.layout.y;
     pageHeights.current[pageNum] = e.nativeEvent.layout.height;
   };
+  // Id of the latest report request: a slower, older request (e.g. for a
+  // previously opened attempt) must never overwrite the current one.
+  const reportRequestRef = useRef(0);
   const loadReport = useCallback(async () => {
+    const requestId = ++reportRequestRef.current;
+    const isStale = () => requestId !== reportRequestRef.current;
     setLoading(true);
+    setLoadError('');
     try {
       if (attemptId && attemptId !== 'demo') {
         const data = await getAttemptResult(attemptId);
+        if (isStale()) return;
         if (
           data &&
           (data.report ||
@@ -1060,19 +1068,32 @@ const totalH = 32 * (PAGE_H + PAGE_GAP);
           setReportData(data.data || data);
         } else {
           setReportData(null);
+          setLoadError('Your Career Compass Report has not been generated for this attempt yet.');
         }
       } else {
         setReportData(null);
       }
     } catch (err) {
+      if (isStale()) return;
       console.warn('Could not fetch remote result:', err?.message);
       setReportData(null);
+      setLoadError(
+        err?.response?.data?.message ||
+          (err?.response ? '' : 'Please check your internet connection and try again.')
+      );
     } finally {
-      setLoading(false);
+      if (!isStale()) setLoading(false);
     }
   }, [attemptId]);
 
   useEffect(() => {
+    // A different attempt was opened on the (still mounted) drawer screen:
+    // start again from page 1.
+    setCurrentPage(1);
+    setPageModalVisible(false);
+    pageOffsets.current = {};
+    pageHeights.current = {};
+    scrollViewRef.current?.scrollTo({ y: 0, animated: false });
     loadReport();
   }, [loadReport]);
 
@@ -1083,6 +1104,7 @@ const totalH = 32 * (PAGE_H + PAGE_GAP);
   };
 
   const [printing, setPrinting] = useState(false);
+  const [printProgress, setPrintProgress] = useState('');
 
   // Normalize API data with rich defaults matching User Portal
   const rawData = reportData || {};
@@ -1183,12 +1205,13 @@ const totalH = 32 * (PAGE_H + PAGE_GAP);
   const rankDomainFacets = (items, definitions, fallbackScores = {}) => definitions
     .map(({ facet, label }) => {
       const apiItem = items.find((item) => item?.facet === facet);
-      const rawScore = apiItem?.percentage ?? apiItem?.score;
-      return {
-        facet,
-        label,
-        score: rawScore != null ? pct(rawScore) : (fallbackScores[facet] ?? 0),
-      };
+      // `percentage` is already 0-100 from the backend; only the raw 0-1
+      // `score` needs converting (pct(1) would wrongly turn 1% into 100%).
+      let score;
+      if (apiItem?.percentage != null) score = Math.round(Number(apiItem.percentage) || 0);
+      else if (apiItem?.score != null) score = pct(apiItem.score);
+      else score = fallbackScores[facet] ?? 0;
+      return { facet, label, score };
     })
     .sort((a, b) => b.score - a.score);
 
@@ -1580,24 +1603,40 @@ useEffect(() => {
       return;
     }
 
-    // ---------- NATIVE: snapshot every on-screen page, print the images ----------
-      // ---------- NATIVE: capture pages, build PDF, save it ----------
-    const images = [];
-    for (let i = 1; i <= 32; i++) {
-      const ref = pageRefs.current[i];
-      if (!ref) continue;
-      const b64 = await captureRef(ref, {
+    // ---------- NATIVE: capture pages, build PDF, save it ----------
+    // Every page must be captured; a PDF with missing pages is never produced.
+    const TOTAL_PAGES = 32;
+    const missingPages = [];
+    for (let i = 1; i <= TOTAL_PAGES; i++) {
+      if (!pageRefs.current[i]) missingPages.push(i);
+    }
+    if (missingPages.length > 0) {
+      Alert.alert(
+        'Could not create the PDF',
+        'Some report pages have not finished loading yet. Please scroll through the report once and try again.'
+      );
+      return;
+    }
+
+    // Each page is wrapped into its final HTML fragment as soon as it is
+    // captured, so the raw base64 strings are not kept around separately
+    // (lower peak memory than collecting all images and mapping them later).
+    const pageParts = [];
+    for (let i = 1; i <= TOTAL_PAGES; i++) {
+      setPrintProgress(`${i}/${TOTAL_PAGES}`);
+      const b64 = await captureRef(pageRefs.current[i], {
         format: 'jpg',
         quality: 0.7,
         result: 'base64',
         width: 827,
         height: 1170,
       });
-      images.push(b64);
+      if (!b64) throw new Error(`Page ${i} could not be captured`);
+      pageParts.push(`<div class="p"><img src="data:image/jpeg;base64,${b64}" /></div>`);
     }
+    setPrintProgress('PDF');
 
-    const html = `
-      <html><head><meta charset="utf-8" />
+    pageParts.unshift(`<html><head><meta charset="utf-8" />
       <style>
         @page { size: 210mm 297mm; margin: 0; }
         html, body { margin: 0; padding: 0; }
@@ -1605,35 +1644,63 @@ useEffect(() => {
              page-break-after: always; break-after: page; }
         .p:last-child { page-break-after: auto; break-after: auto; }
         .p img { display: block; width: 100%; height: 100%; }
-      </style></head><body>
-      ${images.map((b) => `<div class="p"><img src="data:image/jpeg;base64,${b}" /></div>`).join('')}
-      </body></html>`;
+      </style></head><body>`);
+    pageParts.push('</body></html>');
+    let html = pageParts.join('');
+    pageParts.length = 0;
 
     // Build the A4 PDF
     const { uri } = await Print.printToFileAsync({ html, width: 595, height: 842 });
+    html = null;
     const fileName = `${cleanFilename}.pdf`;
 
-    try {
-      if (Platform.OS === 'android') {
-        // Ask where to save (e.g. Downloads), then write the file there
-        const dir = await Directory.pickDirectoryAsync();
+    if (Platform.OS === 'android') {
+      // Ask where to save (e.g. Downloads), then write the file there
+      let dir = null;
+      try {
+        dir = await Directory.pickDirectoryAsync();
+      } catch (pickErr) {
+        console.warn('Folder picker closed:', pickErr?.message);
+      }
+      if (!dir) {
+        Alert.alert('Save cancelled', 'No folder was selected, so the PDF was not saved.');
+        return;
+      }
+      try {
         const dest = dir.createFile(fileName, 'application/pdf');
         const bytes = await new File(uri).bytes();
         dest.write(bytes);
         Alert.alert('Saved', `${fileName} was saved to the folder you selected.`);
-      } else {
-        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf' });
+      } catch (saveErr) {
+        console.warn('Save error:', saveErr);
+        Alert.alert('Not saved', 'The PDF could not be written to the selected folder. Please try again or choose a different folder.');
       }
-    } catch (saveErr) {
-      console.warn('Save error:', saveErr);
-      Alert.alert('Not saved', 'The PDF was not saved. Please try again and choose a folder.');
+    } else {
+      const canShare = await Sharing.isAvailableAsync().catch(() => false);
+      if (!canShare) {
+        Alert.alert('Sharing unavailable', 'Sharing is not available on this device, so the PDF could not be saved.');
+        return;
+      }
+      try {
+        await Sharing.shareAsync(uri, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf' });
+      } catch (shareErr) {
+        console.warn('Share error:', shareErr);
+        Alert.alert('Not shared', 'The PDF was created but could not be shared. Please try again.');
+      }
     }
     return;
   } catch (err) {
     console.warn('Print error:', err);
-    Alert.alert('Print Error', 'Could not open print dialog. Please try again.');
+    if (Platform.OS === 'web') {
+      Alert.alert('Print Error', 'Could not open print dialog. Please try again.');
+    } else {
+      Alert.alert('Could not create the PDF', 'Something went wrong while creating the PDF. Please try again.');
+    }
   } finally {
-    if (Platform.OS !== 'web') setPrinting(false);
+    if (Platform.OS !== 'web') {
+      setPrinting(false);
+      setPrintProgress('');
+    }
   }
 };
  const cardStyle = {
@@ -1653,113 +1720,11 @@ useEffect(() => {
 };
 
 
-  if (loading) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.pageBg, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color={COLORS.red} />
-        <Text style={{ color: COLORS.dark, fontSize: 19.5, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800', marginTop: 14 }}>
-          Generating Career Compass Report...
-        </Text>
-        <Text style={{ color: COLORS.muted, fontSize: 13.8, marginTop: 4 }}>
-          Synthesizing 32 pages of RIASEC, OCEAN, Schwartz Values, Aptitudes, and Pathways
-        </Text>
-      </SafeAreaView>
-    );
-  }
-
-  return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.pageBg, fontFamily: 'Poppins_400Regular' }}>
-      {/* Sticky Action Bar (Hidden on Print) */}
-      <View
-        nativeID="report-action-bar"
-        className="no-print report-action-bar"
-        dataSet={{ noPrint: 'true' }}
-        style={{
-          backgroundColor: '#ffffff',
-          borderBottomWidth: 1,
-          borderBottomColor: COLORS.line,
-          paddingHorizontal: 14,
-          paddingVertical: 10,
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          zIndex: 10,
-          elevation: 4,
-        }}
-      >
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={() => router.replace('/(drawer)/(tabs)/assessment')}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: '#F1F5F9',
-            paddingHorizontal: 12,
-            paddingVertical: 7,
-            borderRadius: 20,
-            gap: 5,
-          }}
-        >
-          <Ionicons name="arrow-back" size={14} color={COLORS.dark} />
-          <Text style={{ color: COLORS.dark, fontSize: 13.2, fontFamily: 'Poppins_700Bold', fontWeight: '700' }}>Assessments</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={() => setPageModalVisible(true)}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: '#F8FAFC',
-            borderWidth: 1,
-            borderColor: '#CBD5E1',
-            paddingHorizontal: 10,
-            paddingVertical: 6,
-            borderRadius: 16,
-            gap: 4,
-          }}
-        >
-          <Text style={{ fontSize: 12.6, fontFamily: 'Poppins_700Bold', fontWeight: '700', color: COLORS.dark }}>
-            Page {currentPage} of 32
-          </Text>
-          <Ionicons name="chevron-down" size={13} color={COLORS.muted} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          activeOpacity={0.8}
-          onPress={handlePrint}
-          disabled={printing}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            backgroundColor: COLORS.red,
-            paddingHorizontal: 14,
-            paddingVertical: 7,
-            borderRadius: 20,
-            gap: 6,
-          }}
-        >
-          {printing ? (
-            <ActivityIndicator size="small" color="#ffffff" style={{ transform: [{ scale: 0.8 }] }} />
-          ) : (
-            <Ionicons name="print-outline" size={15} color="#ffffff" />
-          )}
-          <Text style={{ color: '#ffffff', fontSize: 13.2, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>
-           {printing ? 'Saving...' : 'Save PDF'}
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {/* Main Document: Exactly 32 Pages matching User Portal */}
-      <ScrollView
-        style={{ fontFamily: 'Poppins_400Regular' }}
-        ref={scrollViewRef}
-        nativeID="assessment-report-content"
-        testID="assessment-report-content"
-        onContentSizeChange={(w, h) => { contentSize.current = { width: w, height: h }; }}
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={{ paddingTop: 16, paddingBottom: 40, alignItems: 'center' }}
-      >
+  // Build the 32-page tree only when the report data (or screen width) changes.
+  // Reusing the same element lets React skip re-rendering every page when only
+  // the page picker, page counter or Save PDF progress state changes.
+  // Everything used inside is derived from these dependencies (or refs).
+  const reportPages = useMemo(() => (
       <View style={{ width: PAGE_W * viewScale, height: totalH * viewScale, overflow: 'hidden' }}>
 <View
   ref={contentRef}
@@ -2107,19 +2072,19 @@ useEffect(() => {
         {/* ============================================================
             PAGE 3: YOUR PROFILING (PERSONAL PROFILING)
         ============================================================ */}
-        {yourProfiling ? (
-          <YourProfilingReport
-            profilingData={yourProfiling}
-            studentFirstName={studentFirstName}
-            PageHeader={PageHeader}
-            PageFooter={PageFooter}
-            TitlePill={TitlePill}
-            pageNum={3}
-            cardStyle={cardStyle}
-            recordPageLayout={recordPageLayout}
-            pageRefs={pageRefs}
-          />
-        ) : null}
+        {/* Always render page 3 so the report keeps 32 pages; missing profiling
+            data is shown as not available inside the component. */}
+        <YourProfilingReport
+          profilingData={yourProfiling}
+          studentFirstName={studentFirstName}
+          PageHeader={PageHeader}
+          PageFooter={PageFooter}
+          TitlePill={TitlePill}
+          pageNum={3}
+          cardStyle={cardStyle}
+          recordPageLayout={recordPageLayout}
+          pageRefs={pageRefs}
+        />
 
         {/* ============================================================
             PAGE 4: INTRODUCTION (WHEEL / BULB DIAGRAM)
@@ -2781,10 +2746,10 @@ useEffect(() => {
             <TitlePill title="WORK VALUES" colorClass="green" />
 
             <Text style={leadText}>
-              "Work values are the core principles and priorities that define what matters most to you in a professional environment. They reflect what you seek from your career — whether that is achievement, recognition, security, autonomy, relationships, or making a meaningful impact. Unlike interests (what you enjoy) or personality (how you behave), work values reveal why certain careers feel more fulfilling than others.
+              &quot;Work values are the core principles and priorities that define what matters most to you in a professional environment. They reflect what you seek from your career — whether that is achievement, recognition, security, autonomy, relationships, or making a meaningful impact. Unlike interests (what you enjoy) or personality (how you behave), work values reveal why certain careers feel more fulfilling than others.
             </Text>
             <Text style={leadText}>
-              Understanding your work values helps you evaluate job opportunities beyond salary and title. When your work aligns with your values, you feel more motivated, satisfied, and committed. When it does not, even a well-paying or prestigious role can feel empty. Identifying your core values early helps you make career choices that bring long-term fulfilment."
+              Understanding your work values helps you evaluate job opportunities beyond salary and title. When your work aligns with your values, you feel more motivated, satisfied, and committed. When it does not, even a well-paying or prestigious role can feel empty. Identifying your core values early helps you make career choices that bring long-term fulfilment.&quot;
             </Text>
 
             {/* web: my-2 py-2 h-[380px] overflow-hidden flex center; img w-full (698 wide, natural 3:2 height) clipped */}
@@ -3914,6 +3879,159 @@ useEffect(() => {
         </View>
         </View>
         </View>
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ), [reportData, attemptId, user, viewScale]);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.pageBg, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={COLORS.red} />
+        <Text style={{ color: COLORS.dark, fontSize: 19.5, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800', marginTop: 14 }}>
+          Generating Career Compass Report...
+        </Text>
+        <Text style={{ color: COLORS.muted, fontSize: 13.8, marginTop: 4 }}>
+          Synthesizing 32 pages of RIASEC, OCEAN, Schwartz Values, Aptitudes, and Pathways
+        </Text>
+      </SafeAreaView>
+    );
+  }
+
+  // The result could not be loaded: never render a 32-page report full of
+  // zero/placeholder values (same behaviour as the user portal).
+  if (!isDemo && !reportData) {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.pageBg, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+        <View style={{ width: '100%', maxWidth: 420, backgroundColor: '#ffffff', borderRadius: 18, padding: 24, alignItems: 'center' }}>
+          <Ionicons name="document-text-outline" size={40} color={COLORS.red} />
+          <Text style={{ color: COLORS.dark, fontSize: 20, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800', marginTop: 10, textAlign: 'center' }}>
+            Report not available
+          </Text>
+          <Text style={{ color: COLORS.muted, fontSize: 13.5, marginTop: 8, textAlign: 'center', lineHeight: 20 }}>
+            We could not load your Career Compass Report. It may not be ready yet, or the assessment may not be completed.
+          </Text>
+          {loadError ? (
+            <Text style={{ color: COLORS.dark, fontSize: 12.5, marginTop: 8, textAlign: 'center', lineHeight: 18 }}>
+              {loadError}
+            </Text>
+          ) : null}
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 10, marginTop: 20 }}>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={loadReport}
+              style={{ backgroundColor: COLORS.red, borderRadius: 20, paddingHorizontal: 20, paddingVertical: 10 }}
+            >
+              <Text style={{ color: '#ffffff', fontSize: 13.5, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>Retry</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              activeOpacity={0.85}
+              onPress={() => router.replace('/(drawer)/(tabs)/assessment')}
+              style={{ backgroundColor: '#F1F5F9', borderRadius: 20, paddingHorizontal: 20, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 5 }}
+            >
+              <Ionicons name="arrow-back" size={14} color={COLORS.dark} />
+              <Text style={{ color: COLORS.dark, fontSize: 13.5, fontFamily: 'Poppins_700Bold', fontWeight: '700' }}>Back to Assessment</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  return (
+    <SafeAreaView style={{ flex: 1, backgroundColor: COLORS.pageBg, fontFamily: 'Poppins_400Regular' }}>
+      {/* Sticky Action Bar (Hidden on Print) */}
+      <View
+        nativeID="report-action-bar"
+        className="no-print report-action-bar"
+        dataSet={{ noPrint: 'true' }}
+        style={{
+          backgroundColor: '#ffffff',
+          borderBottomWidth: 1,
+          borderBottomColor: COLORS.line,
+          paddingHorizontal: 14,
+          paddingVertical: 10,
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          zIndex: 10,
+          elevation: 4,
+        }}
+      >
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() => router.replace('/(drawer)/(tabs)/assessment')}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: '#F1F5F9',
+            paddingHorizontal: 12,
+            paddingVertical: 7,
+            borderRadius: 20,
+            gap: 5,
+          }}
+        >
+          <Ionicons name="arrow-back" size={14} color={COLORS.dark} />
+          <Text style={{ color: COLORS.dark, fontSize: 13.2, fontFamily: 'Poppins_700Bold', fontWeight: '700' }}>Assessments</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={() => setPageModalVisible(true)}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: '#F8FAFC',
+            borderWidth: 1,
+            borderColor: '#CBD5E1',
+            paddingHorizontal: 10,
+            paddingVertical: 6,
+            borderRadius: 16,
+            gap: 4,
+          }}
+        >
+          <Text style={{ fontSize: 12.6, fontFamily: 'Poppins_700Bold', fontWeight: '700', color: COLORS.dark }}>
+            Page {currentPage} of 32
+          </Text>
+          <Ionicons name="chevron-down" size={13} color={COLORS.muted} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          activeOpacity={0.8}
+          onPress={handlePrint}
+          disabled={printing}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: COLORS.red,
+            paddingHorizontal: 14,
+            paddingVertical: 7,
+            borderRadius: 20,
+            gap: 6,
+          }}
+        >
+          {printing ? (
+            <ActivityIndicator size="small" color="#ffffff" style={{ transform: [{ scale: 0.8 }] }} />
+          ) : (
+            <Ionicons name="print-outline" size={15} color="#ffffff" />
+          )}
+          <Text style={{ color: '#ffffff', fontSize: 13.2, fontFamily: 'Poppins_800ExtraBold', fontWeight: '800' }}>
+           {printing
+             ? (printProgress && printProgress !== 'PDF' ? `Page ${printProgress}` : 'Saving...')
+             : 'Save PDF'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Main Document: Exactly 32 Pages matching User Portal */}
+      <ScrollView
+        style={{ fontFamily: 'Poppins_400Regular' }}
+        ref={scrollViewRef}
+        nativeID="assessment-report-content"
+        testID="assessment-report-content"
+        onContentSizeChange={(w, h) => { contentSize.current = { width: w, height: h }; }}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={{ paddingTop: 16, paddingBottom: 40, alignItems: 'center' }}
+      >
+      {reportPages}
       </ScrollView>
       
 

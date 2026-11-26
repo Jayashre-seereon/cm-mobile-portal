@@ -1,5 +1,5 @@
 import { Ionicons } from '@expo/vector-icons';
-import { Image, Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import { Image, Pressable, ScrollView, Text, View } from 'react-native';
 import { useEffect, useMemo, useState } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { getNewsletters } from '../../src/api/newsletterApi';
@@ -10,9 +10,15 @@ import { palette } from '../../src/careermap-data';
 import { openSubscriptionPrompt } from '../../src/subscription-flow';
 import { useSearchDeepLink } from '../../src/utils/searchNavigation';
 import { buildFreeKeys, getPreviewLimit, isPreviewFree, PREVIEW_MODULES } from '../../src/utils/previewAccess';
+import { normalizeExternalUrl, openExternalUrl } from '../../src/utils/openExternalUrl';
 
 const stripHtml = (value) => String(value || '').replace(/<[^>]*>/g, '').trim();
-const getViewUrl = (item) => String(item?.image || item?.url || '').trim();
+// Only valid http(s) links (scheme added when missing); anything else hides its button.
+const getExternalUrl = (item) => normalizeExternalUrl(item?.url);
+// "View" opens the uploaded file; without one it falls back to the link (same as the portal).
+const getViewUrl = (item) => normalizeExternalUrl(item?.image) || getExternalUrl(item);
+// The admin types the type as free text ("Weekly", "weekly ", "WEEKLY").
+const normalizeNewsletterType = (value) => String(value || '').trim().toUpperCase();
 
 // "PDF" / "Image" / ... label shown on each card (same as the user portal).
 function getFileKindLabel(url) {
@@ -70,7 +76,8 @@ export default function NewsletterScreen() {
         }
 
         if (!Number.isFinite(moduleId)) {
-          if (mounted) setResolvedAccessStatus(normalizeMode(params?.accessStatus, undefined));
+          // Module not found: stay locked. Access never comes from a route param.
+          if (mounted) setResolvedAccessStatus('locked');
           return;
         }
 
@@ -88,7 +95,7 @@ export default function NewsletterScreen() {
     return () => {
       mounted = false;
     };
-  }, [params?.accessStatus, params?.moduleId]);
+  }, [params?.moduleId]);
 
   useEffect(() => {
     let mounted = true;
@@ -127,7 +134,7 @@ export default function NewsletterScreen() {
 const filteredItems =
   selectedType === "ALL"
     ? items
-    : items.filter((item) => item.type === selectedType);
+    : items.filter((item) => normalizeNewsletterType(item?.type) === selectedType);
   // Global search / Career Bee: show the picked article first; its lock still follows the
   // full list's free items.
   const searchFocusActive = useSearchDeepLink(params?.searchKey, !loading, () => {
@@ -207,8 +214,10 @@ const filteredItems =
             // preview mode -> only the first `previewLimit` items of the full list unlocked
             // locked mode -> nothing unlocked
             const cardUnlocked = hasFullAccess || (isPreview && isPreviewFree(previewFreeKeys, item));
-            const viewUrl = getViewUrl(item);
-            const externalUrl = String(item?.url || '').trim();
+            const externalUrl = getExternalUrl(item);
+            const fileUrl = getViewUrl(item);
+            // Don't show two buttons that open the same link.
+            const viewUrl = fileUrl && fileUrl !== externalUrl ? fileUrl : null;
             const returnTarget = {
               pathname: '/(drawer)/newsletter',
               params: {
@@ -249,7 +258,7 @@ const filteredItems =
            <View className="flex-row flex-wrap items-center justify-between px-4 pb-4">
                 {cardUnlocked && viewUrl ? (
                   <Pressable
-                    onPress={() => Linking.openURL(viewUrl)}
+                    onPress={() => { void openExternalUrl(viewUrl); }}
                     className="rounded-full px-4 py-2"
                     style={{ backgroundColor: palette.secondary }}
                   >
@@ -258,7 +267,7 @@ const filteredItems =
                 ) : null}
                 {cardUnlocked && externalUrl ? (
                   <Pressable
-                    onPress={() => Linking.openURL(externalUrl)}
+                    onPress={() => { void openExternalUrl(externalUrl); }}
                     className="rounded-full px-4 py-2"
                     style={{ backgroundColor: palette.primary }}
                   >
@@ -270,8 +279,13 @@ const filteredItems =
           );
           })}
 
-          {!loading && !items.length ? (
+          {!loading && !error && !items.length ? (
             <Text className={`text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>No newsletters available right now.</Text>
+          ) : null}
+          {!loading && items.length > 0 && !displayedItems.length ? (
+            <Text className={`text-[13px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>
+              {`No ${selectedType === 'WEEKLY' ? 'weekly' : 'quarterly'} newsletters available right now.`}
+            </Text>
           ) : null}
         </View>
       </ScrollView>

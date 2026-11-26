@@ -16,7 +16,7 @@ import { formatOtpMobile, getEmailError, getPasswordError, isValidEmail, isValid
 
 export default function LoginScreen() {
   const { onboarding, preferences, saveUserProfile } = useAppState();
-  const { userType } = useLocalSearchParams();
+  const { userType, mode, resetSuccess } = useLocalSearchParams();
   const setSignupForm = useAuthStore((state) => state.setSignupForm);
   const setOnboardingData = useAuthStore((state) => state.setOnboardingData);
   const setAccessToken = useAuthStore((state) => state.setAccessToken);
@@ -27,7 +27,8 @@ export default function LoginScreen() {
   const clearAuthFlow = useAuthStore((state) => state.clearAuthFlow);
 
   const isExistingUser = userType === 'existing';
-  const [loginMode, setLoginMode] = useState('mobile');
+  // Forgot / reset password send people back here with mode=email and a success message.
+  const [loginMode, setLoginMode] = useState(isExistingUser && mode === 'email' ? 'email' : 'mobile');
   const [mobile, setMobile] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -36,10 +37,11 @@ export default function LoginScreen() {
     email: '',
     password: '',
   });
-  const [status, setStatus] = useState({
-    type: 'idle',
-    message: '',
-  });
+  const [status, setStatus] = useState(() =>
+    typeof resetSuccess === 'string' && resetSuccess
+      ? { type: 'success', message: resetSuccess }
+      : { type: 'idle', message: '' }
+  );
   const [isSendingOtp, setIsSendingOtp] = useState(false);
   const [isSubmittingEmail, setIsSubmittingEmail] = useState(false);
   const canSubmitEmail = isValidEmail(email) && isValidPassword(password);

@@ -1,7 +1,7 @@
 import { useFocusEffect } from '@react-navigation/native';
 import { router } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Linking } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import { getUserDashboard } from '../api/authApi';
 import { checkModuleAccess, getModules } from '../api/moduleAccessApi';
 import {
@@ -11,6 +11,7 @@ import {
   loadPreviewFreeKeys,
   resolvePreviewAccess,
 } from './previewAccess';
+import { normalizeExternalUrl, openExternalUrl } from './openExternalUrl';
 
 /**
  * One place that turns a global-search item (GET /api/search result, also used for
@@ -294,6 +295,45 @@ export async function loadDashboardModulesByRoute() {
   return map;
 }
 
+/*
+ * External links come from admin content (search) or the chatbot's answer (Career Bee), so
+ * they are never opened silently: the user sees the site's host name and confirms first.
+ * Invalid links and failures are reported (openExternalUrl shows an alert).
+ * Resolves to true when the link was opened.
+ */
+function confirmAndOpenExternal(rawUrl) {
+  const url = normalizeExternalUrl(rawUrl);
+  if (!url || !/^https?:\/\//i.test(url)) {
+    Alert.alert('Link unavailable', 'This link is not available right now.');
+    return Promise.resolve(false);
+  }
+  let host = url;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    // keep the full url as the label
+  }
+  const message = `This link opens ${host} outside the app.`;
+  if (Platform.OS === 'web') {
+    // react-native-web's Alert has no buttons; use the browser's confirm dialog.
+    const ok = typeof window !== 'undefined' && typeof window.confirm === 'function'
+      ? window.confirm(`Open external website?\n${message}`)
+      : false;
+    return ok ? openExternalUrl(url) : Promise.resolve(false);
+  }
+  return new Promise((resolve) => {
+    Alert.alert(
+      'Open external website?',
+      message,
+      [
+        { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Open', onPress: () => { openExternalUrl(url).then(resolve, () => resolve(false)); } },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
+}
+
 /**
  * Navigate to a resolved target the way the dashboard does.
  * With `searchItem` (a global-search result that opens one page inside a module) it also
@@ -301,15 +341,15 @@ export async function loadDashboardModulesByRoute() {
  * shows the lock prompt, and when access can't be verified the page stays closed.
  * @param {{ pathname?: string, params?: object, url?: string }} target
  * @param {{ onLocked?: (info: { title: string, message: string, returnTarget: object }) => void, fromGlobalSearch?: boolean, searchItem?: object }} options
- * @returns {Promise<'external'|'opened'|'locked'>}
+ * @returns {Promise<'external'|'opened'|'locked'|'cancelled'>} 'cancelled' = external link not opened
  */
 export async function openTarget(target, { onLocked, fromGlobalSearch = false, searchItem } = {}) {
   if (!target) {
     return 'opened';
   }
   if (target.url) {
-    await Linking.openURL(target.url).catch(() => {});
-    return 'external';
+    const opened = await confirmAndOpenExternal(target.url);
+    return opened ? 'external' : 'cancelled';
   }
 
   const pathname = target.pathname || ROUTES.dashboard;

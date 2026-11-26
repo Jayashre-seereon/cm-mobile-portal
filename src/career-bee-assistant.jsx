@@ -468,7 +468,8 @@ export function CareerBeeAssistant({ hidden = false }) {
         }
         // Passing the tapped card applies the same preview / lock rules as global search.
         const result = await openTarget(target, { onLocked: setLockedInfo, searchItem });
-        if (result !== 'locked') {
+        // Keep the chat open when the link was locked, cancelled or could not be opened.
+        if (result === 'opened' || result === 'external') {
             closeSheet();
         }
     };

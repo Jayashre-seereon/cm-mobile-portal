@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Text, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { createUserHistoryEntry, getApiErrorMessage, sendOtp, verifyOtp } from '../src/api/authApi';
@@ -13,9 +13,12 @@ import { ZoomInPage } from '../src/page-transition';
 import { useAuthStore } from '../src/store/auth-store';
 import { formatOtpMobile, mapApiUserToProfile } from '../src/utils/auth';
 
+// Seconds before "Resend OTP" can be used again (an OTP was just sent when this screen opens).
+const RESEND_COOLDOWN_SECONDS = 30;
+
 export default function OtpVerifyScreen() {
   const { preferences, saveUserProfile } = useAppState();
-  const { next, identifier, otpType, devOtp } = useLocalSearchParams();  const signupForm = useAuthStore((state) => state.signupForm);
+  const { next, identifier, otpType, devOtp, resume } = useLocalSearchParams();  const signupForm = useAuthStore((state) => state.signupForm);
   const setTempToken = useAuthStore((state) => state.setTempToken);
   const setAccessToken = useAuthStore((state) => state.setAccessToken);
   const setRefreshToken = useAuthStore((state) => state.setRefreshToken);
@@ -29,6 +32,14 @@ export default function OtpVerifyScreen() {
   const [otp, setOtp] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isResending, setIsResending] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(RESEND_COOLDOWN_SECONDS);
+  useEffect(() => {
+    if (resendCooldown <= 0) {
+      return undefined;
+    }
+    const timer = setTimeout(() => setResendCooldown((value) => Math.max(0, value - 1)), 1000);
+    return () => clearTimeout(timer);
+  }, [resendCooldown]);
   const [status, setStatus] = useState({
     type: 'idle',
     message: '',
@@ -77,6 +88,11 @@ export default function OtpVerifyScreen() {
 
       setTempToken(response.tempToken);
       setStatus({ type: 'success', message: response.message });
+      if (resume === '1' && router.canGoBack()) {
+        // Re-verifying because the signup token expired: return to the filled-in Complete Profile form.
+        router.back();
+        return;
+      }
       router.replace(next || '/profile-setup');
     } catch (error) {
       setStatus({
@@ -89,6 +105,9 @@ export default function OtpVerifyScreen() {
   };
 
   const handleResendOtp = async () => {
+    if (isResending || resendCooldown > 0) {
+      return;
+    }
     try {
       setIsResending(true);
       setStatus({ type: 'idle', message: '' });
@@ -101,6 +120,7 @@ export default function OtpVerifyScreen() {
         type: 'success',
         message: resendOtp ? `${response.message} (DEV OTP: ${resendOtp})` : response.message,
       });
+      setResendCooldown(RESEND_COOLDOWN_SECONDS);
     } catch (error) {
       setStatus({
         type: 'error',
@@ -148,8 +168,10 @@ export default function OtpVerifyScreen() {
           >
             <Text className="text-[15px] font-extrabold text-white">{isSubmitting ? 'Verifying...' : 'Verify and Continue'}</Text>
           </AnimatedPressable>
-          <AnimatedPressable onPress={handleResendOtp} disabled={isResending || !mobileNumber}>
-            <Text className="text-[13px] font-bold text-brand">{isResending ? 'Resending OTP...' : 'Resend OTP'}</Text>
+          <AnimatedPressable onPress={handleResendOtp} disabled={isResending || resendCooldown > 0 || !mobileNumber}>
+            <Text className={`text-[13px] font-bold ${resendCooldown > 0 ? 'text-muted' : 'text-brand'}`}>
+              {isResending ? 'Resending OTP...' : resendCooldown > 0 ? `Resend OTP in ${resendCooldown}s` : 'Resend OTP'}
+            </Text>
           </AnimatedPressable>
           {status.type !== 'idle' ? (
             <Text className={`max-w-[260px] text-center text-[12px] font-bold ${status.type === 'error' ? 'text-danger' : 'text-success'}`}>
