@@ -1,14 +1,14 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useCallback, useEffect, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
-import { Text, View } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import { useAppState } from '../../src/app-state';
 import { palette } from '../../src/careermap-data';
 import { AnimatedPressable, Screen, SectionHeader } from '../../src/careermap-ui';
 import { useAuthStore } from '../../src/store/auth-store';
 
 export default function NotificationsScreen() {
-    const { preferences, notifications: appNotifications, refreshNotifications } = useAppState();
+    const { preferences, notifications: appNotifications, refreshNotifications, markNotificationsAsRead, unreadNotificationsCount } = useAppState();
     const accessToken = useAuthStore((state) => state.accessToken);
     const hasAuthenticatedSession = useAuthStore((state) => state.hasAuthenticatedSession);
     const [notifications, setNotifications] = useState(appNotifications);
@@ -62,18 +62,35 @@ export default function NotificationsScreen() {
         </View>
       ) : null}
 
+      {notifications.length ? (
+        <View className="flex-row items-center justify-between">
+          <Text className={`text-[13px] font-bold ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>
+            {unreadNotificationsCount ? `${unreadNotificationsCount} unread` : 'All caught up'}
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            disabled={!unreadNotificationsCount}
+            onPress={() => markNotificationsAsRead()}
+            hitSlop={8}
+            style={{ opacity: unreadNotificationsCount ? 1 : 0.45 }}
+          >
+            <Text className="text-[13px] font-extrabold" style={{ color: palette.primary }}>Mark all read</Text>
+          </Pressable>
+        </View>
+      ) : null}
+
       <View className="gap-3">
         {notifications.map((item) => {
-            const isPending = String(item.status).toLowerCase() === 'pending';
+            const isUnread = Boolean(item.unread);
 
             return (
-              <View key={item.id} className={`gap-3 rounded-[22px] border p-[18px] ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : 'border-line bg-card'}`}>
+              <Pressable key={item.id} onPress={() => isUnread && markNotificationsAsRead([item.id])} className={`gap-3 rounded-[22px] border p-[18px] ${preferences.darkMode ? 'border-[#1a1a1a] bg-[#080808]' : isUnread ? 'border-line bg-[#fff7f4]' : 'border-line bg-card'}`}>
                 <View className="flex-row items-start justify-between gap-3">
                   <View className="flex-1 gap-1">
                     <Text className={`text-[16px] font-extrabold ${preferences.darkMode ? 'text-white' : 'text-ink'}`}>{item.title}</Text>
                     <Text className={`text-[12px] ${preferences.darkMode ? 'text-[#b7aeb9]' : 'text-muted'}`}>{item.target}</Text>
                   </View>
-                  {isPending ? (
+                  {isUnread ? (
                     <View className="mt-1 h-[10px] w-[10px] rounded-full bg-brand"/>
                   ) : null}
                 </View>
@@ -96,7 +113,7 @@ export default function NotificationsScreen() {
                     </View>
                   ) : null}
                 </View>
-              </View>
+              </Pressable>
             );
         })}
       </View>

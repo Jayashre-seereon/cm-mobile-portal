@@ -1,6 +1,68 @@
 import { Platform } from 'react-native';
+import { File, Paths } from 'expo-file-system';
 import api from './axios';
 import { useAuthStore } from '../store/auth-store';
+
+/*
+ * Read / unread is tracked per user on this device (the backend has no per-user read
+ * endpoint) - the same approach as the web portal. Stored as { [userId]: [ids] }.
+ */
+const READ_STORAGE_KEY = 'careermap-read-notifications';
+const READ_FILE = 'careermap-read-notifications.json';
+let readCache = null;
+
+function currentUserKey() {
+  const user = useAuthStore.getState().user;
+  return String(user?.id ?? user?._id ?? user?.userId ?? 'anon');
+}
+
+function loadReadStore() {
+  if (readCache) return readCache;
+  try {
+    let raw = '';
+    if (Platform.OS === 'web') {
+      raw = (typeof window !== 'undefined' && window.localStorage?.getItem(READ_STORAGE_KEY)) || '';
+    } else {
+      const file = new File(Paths.document, READ_FILE);
+      raw = file.exists ? file.textSync() : '';
+    }
+    const parsed = raw ? JSON.parse(raw) : {};
+    readCache = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    readCache = {};
+  }
+  return readCache;
+}
+
+function saveReadStore(store) {
+  readCache = store;
+  try {
+    const serialized = JSON.stringify(store);
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined') window.localStorage?.setItem(READ_STORAGE_KEY, serialized);
+      return;
+    }
+    const file = new File(Paths.document, READ_FILE);
+    if (!file.exists) file.create();
+    file.write(serialized);
+  } catch {
+    // storage unavailable: the read state still applies until the app restarts
+  }
+}
+
+function getReadIds() {
+  const ids = loadReadStore()[currentUserKey()];
+  return new Set(Array.isArray(ids) ? ids.map(String) : []);
+}
+
+/** Remembers these notifications as read for the logged-in user on this device. */
+export function markNotificationsRead(ids = []) {
+  const store = { ...loadReadStore() };
+  const current = getReadIds();
+  ids.forEach((id) => current.add(String(id)));
+  store[currentUserKey()] = [...current].slice(-500);
+  saveReadStore(store);
+}
 
 // Saves this phone's push token for the logged-in user, so the backend can send phone notifications.
 export async function savePushToken(token) {
@@ -58,7 +120,7 @@ function mapNotificationItem(item, index) {
     type: item?.type || 'General',
     createdAt: formatNotificationDate(item?.createdAt),
     updatedAt: formatNotificationDate(item?.updatedAt),
-    unread: status === 'pending',
+    unread: status === 'pending' && !getReadIds().has(String(item?.id ?? `notification-${index}`)),
     raw: item,
   };
 }
