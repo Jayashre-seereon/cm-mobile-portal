@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { notifications as notificationItems } from './careermap-data';
 import { ensureAccessToken } from './api/axios';
-import { getNotifications } from './api/notificationApi';
+import { getNotifications, markNotificationsRead } from './api/notificationApi';
 import { getMentorBookings, getSubscriptions, getTestHistory } from './api/profile';
 import { useAuthStore } from './store/auth-store';
 import { mapApiUserToProfile, mergeServerProfile } from './utils/auth';
@@ -315,6 +315,18 @@ export function AppStateProvider({ children }) {
         }
     }, [accessToken, hasAuthenticatedSession]);
 
+    // Marks notifications read (all unread ones when no ids are given) and updates the badge at once.
+    const markNotificationsAsRead = useCallback((ids) => {
+        const wanted = ids ? new Set(ids.map(String)) : null;
+        const toMark = notifications
+            .filter((item) => item.unread && (!wanted || wanted.has(String(item.id))))
+            .map((item) => item.id);
+        if (!toMark.length) return;
+        markNotificationsRead(toMark);
+        const marked = new Set(toMark.map(String));
+        setNotifications((current) => current.map((item) => (marked.has(String(item.id)) ? { ...item, unread: false } : item)));
+    }, [notifications]);
+
     useEffect(() => {
         if ((accessToken || refreshToken) && !hasAuthenticatedSession) {
             markAuthenticatedSession();
@@ -572,10 +584,11 @@ export function AppStateProvider({ children }) {
         subscriptionRecords,
         notifications,
         refreshNotifications,
+        markNotificationsAsRead,
         unreadNotificationsCount: notifications.filter((item) => item.unread).length,
         notificationsLoadFailed,
         freeAccessUsage,
-  }), [activePlanId, activeSubscriptionPlanIds, bookings, freeAccessUsage, notifications, notificationsLoadFailed, onboarding, preferences, profileEditRequestKey, promoMessage, refreshNotifications, savedCareers, subscriptionRecords, testHistory, userProfile]);
+  }), [activePlanId, activeSubscriptionPlanIds, bookings, freeAccessUsage, notifications, notificationsLoadFailed, onboarding, preferences, profileEditRequestKey, promoMessage, refreshNotifications, markNotificationsAsRead, savedCareers, subscriptionRecords, testHistory, userProfile]);
     return <AppStateContext.Provider value={value}>{children}</AppStateContext.Provider>;
 }
 export function useAppState() {
