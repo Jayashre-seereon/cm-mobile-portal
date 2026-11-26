@@ -80,7 +80,10 @@ function ChatOptions({ options, onChoose, themed }) {
                         <Pressable
                             key={`opt-${option.step}-${index}`}
                             onPress={() => onChoose(option)}
-                            style={({ pressed }) => ({ width: '49%', minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4, borderRadius: 12, borderWidth: 1, borderColor: pressed ? palette.primary : themed.chipBorder, backgroundColor: pressed ? themed.chipBg : themed.sheet, paddingHorizontal: 10, paddingVertical: 8 })}
+                            android_ripple={{ color: themed.chipBg }}
+                            // Plain style object (not a pressed-state function): on some devices the function form
+                            // is dropped and the row falls back to a vertical layout.
+                            style={{ width: '49%', minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4, borderRadius: 12, borderWidth: 1, borderColor: themed.chipBorder, backgroundColor: themed.sheet, paddingHorizontal: 10, paddingVertical: 8, overflow: 'hidden' }}
                         >
                             <Text style={{ flex: 1, color: themed.text, fontSize: 12, fontWeight: '700', lineHeight: 16 }}>{option.label}</Text>
                             <Ionicons name="chevron-forward" size={12} color={themed.muted} />
@@ -110,7 +113,8 @@ function ChatOptions({ options, onChoose, themed }) {
                                 <Pressable
                                     key={`opt-${option.step}-${index}`}
                                     onPress={() => onChoose(option)}
-                                    style={({ pressed }) => ({ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: index ? 1 : 0, borderTopColor: themed.sheetBorder, backgroundColor: pressed || all ? themed.chipBg : 'transparent' })}
+                                    android_ripple={{ color: themed.chipBg }}
+                                    style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: index ? 1 : 0, borderTopColor: themed.sheetBorder, backgroundColor: all ? themed.chipBg : 'transparent' }}
                                 >
                                     <Text style={{ flex: 1, color: all ? palette.primary : themed.text, fontSize: 12.5, fontWeight: all ? '800' : '600' }}>{text}</Text>
                                     {count ? (
